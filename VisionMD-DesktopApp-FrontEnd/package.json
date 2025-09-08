@@ -1,0 +1,95 @@
+{
+  "name": "visionmd",
+  "main": "out/main/index.js",
+  "version": "0.1.7",
+  "description": "A user friendly, open-source software tool designed to automate video-based kinematic analysis of motor tasks for assessment of motor dysfunction in movement disorders.",
+  "author": "VisionMD",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.0",
+    "@mui/icons-material": "^5.14.8",
+    "@mui/material": "^5.16.14",
+    "@mui/system": "^7.1.1",
+    "@types/plotly.js-dist-min": "^2.3.4",
+    "dayjs": "^1.11.13",
+    "localforage": "^1.10.0",
+    "lodash": "^4.17.21",
+    "lucide-react": "^0.511.0",
+    "plotly.js": "^2.27.1",
+    "plotly.js-dist": "^2.27.1",
+    "plotly.js-dist-min": "^3.0.1",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-player": "^2.12.0",
+    "react-plotly.js": "^2.6.0",
+    "react-router-dom": "^6.18.0",
+    "react-select": "^5.8.0",
+    "recharts": "^2.15.3",
+    "tar": "^7.4.3",
+    "tree-kill": "^1.2.2",
+    "uplot": "^1.6.32",
+    "uplot-react": "^1.2.2",
+    "use-debounce": "^10.0.4",
+    "wavesurfer.js": "^7.8.16"
+  },
+  "scripts": {
+    "start": "vite",
+    "dev": "cross-env NODE_ENV=development electron-vite dev",
+    "dev:static": "cross-env NODE_ENV=development APP_ENV=dev_static electron-vite dev",
+    "preview": "cross-env NODE_ENV=production electron-vite preview",
+    "build": "electron-vite build",
+    "build:win": "npm run build && electron-builder --win --x64",
+    "build:mac:dmg": "npm run build && electron-builder --mac=dmg",
+    "build:mac:mas": "npm run build && electron-builder --mac=mas",
+    "build:mac:mas-dev": "npm run build && electron-builder --mac=mas-dev",
+    "build:linux": "npm run build && electron-builder --linux --x64",
+    "serve": "vite preview",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix",
+    "format:check": "prettier 'src/**/*.{js,jsx,ts,tsx,mdx}' --check",
+    "formt:fix": "prettier 'src/**/*.{js,jsx,ts,tsx,mdx}' --write"
+  },
+  "eslintConfig": {
+    "extends": [
+      "react-app",
+      "react-app/jest"
+    ]
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.9.0",
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.20",
+    "cross-env": "^7.0.3",
+    "dotenv-cli": "^8.0.0",
+    "electron": "^36.4.0",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^3.1.0",
+    "eslint": "^9.9.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.2.1",
+    "eslint-plugin-react": "^7.35.0",
+    "eslint-plugin-react-hooks": "^5.1.0-rc.0",
+    "eslint-plugin-react-refresh": "^0.4.9",
+    "globals": "^15.9.0",
+    "postcss": "^8.4.41",
+    "prettier": "^3.3.3",
+    "tailwindcss": "^3.4.10",
+    "vite": "^5.4.2"
+  }
+}
