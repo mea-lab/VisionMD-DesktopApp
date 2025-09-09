@@ -3,15 +3,6 @@ import { useState } from 'react';
 import { taskOptions } from '../../constants/taskOptions'; 
 import Default from './Tasks/default'
 
-
-const Header = ({ resetTaskSelection }) => {
-  return (
-    <div className="flex flex-col border-b-2 py-2 text-gray-100 border-zinc-500">
-      Task Selection
-    </div>
-  );
-};
-
 const selectedTaskFiles = Object.fromEntries(
   taskOptions.map(({ value }) => {
     const fileName = value.toLowerCase().replace(/\s+/g, '_');
@@ -29,18 +20,21 @@ const TaskList = ({
   onTaskDelete,
   videoRef,
   resetTaskSelection,
+  taskTypeData,
+  setTaskTypeData,
 }) => {
   const [options, setOptions] = useState(taskOptions);
 
+
   const onFieldChange = (newValue, fieldName, task) => {
-    let newTask = { ...task };
-    if(newTask[fieldName] && newTask[fieldName] == newValue) return;
-    
-    newTask[fieldName] =
+    if (newValue === null || (Array.isArray(newValue) && newValue.flat().every(v => v === null))) {
+      return;
+    }
+    const value =
       fieldName === 'start' || fieldName === 'end'
         ? Number(Number(newValue).toFixed(3))
         : newValue;
-    onTaskChange(newTask);
+    onTaskChange({ id: task.id, [fieldName]: value });
   };
 
   const onTimeMark = (fieldName, task) => {
@@ -57,7 +51,9 @@ const TaskList = ({
 
   return (
     <div className="flex flex-col gap-2 p-4 py-2 h-full rounded-lg bg-[#333338] shadow-inner">
-      <Header resetTaskSelection={resetTaskSelection} />
+      <div className="flex flex-col border-b-2 py-2 text-gray-100 border-zinc-500">
+        Task Selection
+      </div>
 
       <div className="flex flex-col overflow-y-auto overflow-x-hidden">
         {tasks.length > 0 ? (
@@ -66,16 +62,14 @@ const TaskList = ({
             
             return tasks.map((task, index) => {
               const taskType = task.name;
-              
               const TaskComponent = selectedTaskFiles[taskType];
-
               const taskTypeIndex = typeCounts[taskType] ?? 0;
               typeCounts[taskType] = taskTypeIndex + 1;
-
+            
               if (!TaskComponent) {
                 return (
                   <Default
-                    key={index}
+                    key={task.id}
                     task={task}
                     taskTypeIndex={taskTypeIndex}
                     onFieldChange={onFieldChange}
@@ -84,12 +78,19 @@ const TaskList = ({
                     onTimeClick={onTimeClick}
                     options={options}
                     setOptions={setOptions}
+                    taskGlobals={taskTypeData[task.name] || {}}
+                    setTaskGlobals={(updates) =>
+                      setTaskTypeData(prev => ({
+                        ...prev,
+                        [task.name]: { ...prev[task.name], ...updates }
+                      }))
+                    }
                   />
                 );
               } else {
                 return (
                   <TaskComponent
-                    key={index}
+                    key={task.id}
                     task={task}
                     taskTypeIndex={taskTypeIndex}
                     onFieldChange={onFieldChange}
@@ -98,6 +99,13 @@ const TaskList = ({
                     onTimeClick={onTimeClick}
                     options={options}
                     setOptions={setOptions}
+                    taskGlobals={taskTypeData[task.name] || {}}
+                    setTaskGlobals={(updates) =>
+                      setTaskTypeData(prev => ({
+                        ...prev,
+                        [task.name]: { ...prev[task.name], ...updates }
+                      }))
+                    }
                   />
                 );
               }

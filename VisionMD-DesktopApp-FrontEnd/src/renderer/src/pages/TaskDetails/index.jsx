@@ -18,6 +18,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CircularProgress from '@mui/material/CircularProgress';
+import js from '@eslint/js';
 
 
 const TaskDetails = () => {
@@ -108,8 +109,8 @@ const TaskDetails = () => {
     const taskBoxCords = {
       x: chosenTaskBox.x,
       y: chosenTaskBox.y,
-      width: chosenTaskBox.width,
-      height: chosenTaskBox.height,
+      width: chosenTaskBox.box_width,
+      height: chosenTaskBox.box_height,
     };
 
     const subjectBoundingBoxes = boundingBoxes
@@ -119,17 +120,19 @@ const TaskDetails = () => {
     }))
 
     const { start, end, name, data, ...otherTaskFields } = taskData;
-    const jsonData = JSON.stringify({
+    let jsonData = {
       boundingBox: taskBoxCords,
-      task_name: name,
-      start_time: start,
-      end_time: end,
+      task_name: taskData.name,
+      start_time: taskData.start,
+      end_time: taskData.end,
       fps: fps,
       subject_bounding_boxes: subjectBoundingBoxes,
       ...otherTaskFields,
-    });
+    };
+    jsonData = JSON.stringify(jsonData);
+      
 
-    const form = new FormData();
+    let form = new FormData();
     form.append('video', videoBlob);
     form.append('json_data', jsonData);
 
@@ -141,9 +144,14 @@ const TaskDetails = () => {
       .join('_');
 
     const apiURL = `http://localhost:8000/api/${sanitizedTaskName}/?id=${videoId}`;
+
+    console.log("API URL Generated as:", apiURL);
+    console.log("Upload data", JSON.parse(jsonData));
+
     const res = await fetch(apiURL, { method: 'POST', body: form });
     if (!res.ok) throw new Error(`${name} failed with status ${res.status}`);
 
+    
     const result = await res.json();
     const safeFileName = fileName.replace(/\.[^/.]+$/, '');
 

@@ -13,7 +13,7 @@ const TaskSelection = () => {
     videoId, videoReady, setVideoReady, videoData, setVideoData, videoURL, setVideoURL,
     videoRef, fileName, setFileName, boundingBoxes, setBoundingBoxes,
     fps, setFPS, setTasks, tasks, tasksReady, setTasksReady,
-    persons
+    persons, taskTypeData, setTaskTypeData
   } = useContext(VideoContext);
 
   const navigate = useNavigate();
@@ -62,12 +62,13 @@ const TaskSelection = () => {
     setTasks(prev => [...prev, updateTaskWithBox(newTask)]);
   };
 
-  const onTaskChange = newTask => {
-    console.log("onTaskChange running", newTask)
+  const onTaskChange = (patch) => {
     setTasks(prev =>
-      prev.map(t =>
-        t.id === newTask.id ? { ...updateTaskWithBox(newTask), data: null } : t,
-      ),
+      prev.map(t => {
+        if (t.id !== patch.id) return t;
+        const merged = { ...t, ...patch };
+        return { ...updateTaskWithBox(merged) };
+      })
     );
   };
 
@@ -139,6 +140,8 @@ const TaskSelection = () => {
             taskReady={tasksReady}
             setTasksReady={setTasksReady}
             resetTaskSelection={resetTaskSelection}
+            taskTypeData={taskTypeData}
+            setTaskTypeData={setTaskTypeData}
           />
         </div>
       </div>

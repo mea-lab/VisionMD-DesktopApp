@@ -19,6 +19,7 @@ export const VideoProvider = ({ children }) => {
     const [persons, setPersons] = useState([]);
     const [boundingBoxes, setBoundingBoxes] = useState([]);
     const [tasks, setTasks] = useState([]);
+    const [taskTypeData, setTaskTypeData] = useState({})
 
     const [videoReady, setVideoReady] = useState(false);
     const [boxesReady, setBoxesReady] = useState(false);
@@ -119,6 +120,8 @@ export const VideoProvider = ({ children }) => {
                 setPersons,
                 boxesReady,
                 setBoxesReady,
+                taskTypeData,
+                setTaskTypeData,
             }}
         >
             {children}

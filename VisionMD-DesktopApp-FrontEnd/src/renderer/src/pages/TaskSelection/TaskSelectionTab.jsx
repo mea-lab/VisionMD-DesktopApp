@@ -16,6 +16,8 @@ const TaskSelectionTab = ({
   tasksReady,
   setTasksReady,
   resetTaskSelection,
+  taskTypeData,
+  setTaskTypeData,
 }) => {
   const [openJsonUpload, setOpenJsonUpload] = useState(false);
 
@@ -87,6 +89,8 @@ const TaskSelectionTab = ({
           onTaskDelete={onTaskDelete}
           videoRef={videoRef}
           resetTaskSelection={resetTaskSelection}
+          taskTypeData={taskTypeData}
+          setTaskTypeData={setTaskTypeData}
         />
       )}
     </div>

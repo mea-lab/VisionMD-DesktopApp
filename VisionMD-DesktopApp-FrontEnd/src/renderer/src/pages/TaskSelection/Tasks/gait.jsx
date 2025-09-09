@@ -9,65 +9,6 @@ import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import Tooltip from '@mui/material/Tooltip';
 
 
-// ----- Start: global properties that all gait tasks use -----
-const listeners = new Set();
-let globalFOV = null;
-let globalSensorHeight = null;
-let globalSensorWidth = null;
-let globalFocalLength = null;
-let globalHeight = null;
-let globalIntrinsicMatrix = null;
-let globalExtrinsicMatrix = null;
-
-export function setGlobalFieldofView(onFieldChange, val, task) {
-  globalFOV = val;
-  onFieldChange(val, 'field_of_view', task);
-  listeners.forEach(cb => cb());
-}
-
-export function setGlobalSensorWidth(onFieldChange, val, task) {
-  globalSensorWidth = val;
-  onFieldChange(val, 'sensor_width', task);
-  listeners.forEach(cb => cb());
-}
-
-export function setGlobalSensorHeight(onFieldChange, val, task) {
-  globalSensorHeight = val;
-  onFieldChange(val, 'sensor_height', task);
-  listeners.forEach(cb => cb());
-}
-
-export function setGlobalFocalLength(onFieldChange, val, task) {
-  globalFocalLength = val;
-  onFieldChange(val, 'focal_length', task);
-  listeners.forEach(cb => cb());
-}
-
-export function setGlobalHeight(onFieldChange, val, task) {
-  globalHeight = val;
-  onFieldChange(val, 'height', task);
-  listeners.forEach(cb => cb());
-}
-
-export function setGlobalIntrinsicMatrix(onFieldChange, matrix, task) {
-  globalIntrinsicMatrix = matrix;
-  onFieldChange(matrix, 'intrinsic_matrix', task);
-  listeners.forEach(cb => cb());
-}
-
-export function setGlobalExtrinsicMatrix(onFieldChange, matrix, task) {
-  globalExtrinsicMatrix = matrix;
-  onFieldChange(matrix, 'extrinsic_matrix', task);
-  listeners.forEach(cb => cb());
-}
-
-const subscribe = cb => {
-  listeners.add(cb);
-  return () => listeners.delete(cb);
-};
-// ----- End: global properties that all gait tasks use -----
-
-
 const Gait = ({
   task,
   taskTypeIndex,
@@ -76,46 +17,78 @@ const Gait = ({
   onTimeMark,
   onTimeClick,
   options,
+  taskGlobals,
+  setTaskGlobals,
 }) => {
   const [open, setOpen] = useState(true);
   const taskSelectionRef = useRef(null);
 
-  const defaultIntrinsic = task.intrinsic_matrix || Array.from({ length: 3 }, () => Array(3).fill(0));
-  const defaultExtrinsic = task.extrinsic_matrix || Array.from({ length: 4 }, () => Array(4).fill(0));
+  const defaultIntrinsic = task.intrinsic_matrix || Array.from({ length: 3 }, () => Array(3).fill(null));
+  const defaultExtrinsic = task.extrinsic_matrix || Array.from({ length: 4 }, () => Array(4).fill(null));
 
-  // Global variables that all gait tasks use
-  const h  = useSyncExternalStore(subscribe, () => globalHeight);
-  const fov = useSyncExternalStore(subscribe, () => globalFOV);
-  const sensorW = useSyncExternalStore(subscribe, () => globalSensorWidth);
-  const sensorH = useSyncExternalStore(subscribe, () => globalSensorHeight);
-  const fl = useSyncExternalStore(subscribe, () => globalFocalLength);
-  const intrinsicMatrix = useSyncExternalStore(subscribe, () => globalIntrinsicMatrix || defaultIntrinsic);
-  const extrinsicMatrix = useSyncExternalStore(subscribe, () => globalExtrinsicMatrix || defaultExtrinsic);
+  const h = taskGlobals.height ?? null;
+  const fov = taskGlobals.field_of_view ?? null;
+  const sensorW = taskGlobals.sensor_width ?? null;
+  const sensorH = taskGlobals.sensor_height ?? null;
+  const fl = taskGlobals.focal_length ?? null;
+  const intrinsicMatrix = taskGlobals.intrinsic_matrix || defaultIntrinsic;
+  const extrinsicMatrix = taskGlobals.extrinsic_matrix || defaultExtrinsic;
 
-  // Pop up visibility useStates
   const [showCameraProperties, setShowCameraProperties] = useState(false);
   const [showIntrinsic, setShowIntrinsic] = useState(false);
   const [showExtrinsic, setShowExtrinsic] = useState(false);
 
-  const handleTaskChange = selectedTask => {
+  const handleTaskChange = (selectedTask) => {
     onFieldChange(selectedTask.value, 'name', task);
   };
 
-  // Initialize global values from task
   useEffect(() => {
-    if (globalFocalLength == null && task.focal_length != null)
-      setGlobalFocalLength(onFieldChange, task.focal_length, task);
-
-    if (globalHeight == null && task.height != null)
-      setGlobalHeight(onFieldChange, task.height, task);
-
-    if (globalSensorWidth == null && task.sensor_width != null)
-      setGlobalSensorWidth(onFieldChange, task.sensor_width, task);
-
-    if (globalSensorHeight == null && task.sensor_height != null)
-      setGlobalSensorHeight(onFieldChange, task.sensor_height, task);
+    if (task.field_of_view !== undefined && taskGlobals.field_of_view === undefined) {
+      setTaskGlobals({ field_of_view: task.field_of_view });
+    }
+    if (task.focal_length !== undefined && taskGlobals.focal_length === undefined) {
+      setTaskGlobals({ focal_length: task.focal_length });
+    }
+    if (task.sensor_width !== undefined && taskGlobals.sensor_width === undefined) {
+      setTaskGlobals({ sensor_width: task.sensor_width });
+    }
+    if (task.sensor_height !== undefined && taskGlobals.sensor_height === undefined) {
+      setTaskGlobals({ sensor_height: task.sensor_height });
+    }
+    if (task.height !== undefined && taskGlobals.height === undefined) {
+      setTaskGlobals({ height: task.height });
+    }
+    if (task.intrinsic_matrix !== undefined && taskGlobals.intrinsic_matrix === undefined) {
+      setTaskGlobals({ intrinsic_matrix: task.intrinsic_matrix });
+    }
+    if (task.extrinsic_matrix !== undefined && taskGlobals.extrinsic_matrix === undefined) {
+      setTaskGlobals({ extrinsic_matrix: task.extrinsic_matrix });
+    }
   }, []);
 
+  useEffect(() => {
+    if (typeof taskGlobals.field_of_view !== 'undefined') {
+      onFieldChange(taskGlobals.field_of_view, 'field_of_view', task);
+    }
+    if (typeof taskGlobals.focal_length !== 'undefined') {
+      onFieldChange(taskGlobals.focal_length, 'focal_length', task);
+    }
+    if (typeof taskGlobals.sensor_width !== 'undefined') {
+      onFieldChange(taskGlobals.sensor_width, 'sensor_width', task);
+    }
+    if (typeof taskGlobals.sensor_height !== 'undefined') {
+      onFieldChange(taskGlobals.sensor_height, 'sensor_height', task);
+    }
+    if (typeof taskGlobals.height !== 'undefined') {
+      onFieldChange(taskGlobals.height, 'height', task);
+    }
+    if (typeof taskGlobals.intrinsic_matrix !== 'undefined') {
+      onFieldChange(taskGlobals.intrinsic_matrix, 'intrinsic_matrix', task);
+    }
+    if (typeof taskGlobals.extrinsic_matrix !== 'undefined') {
+      onFieldChange(taskGlobals.extrinsic_matrix, 'extrinsic_matrix', task);
+    }
+  }, [taskGlobals]);
 
   // Renders a size×size matrix editor
   const renderCameraPropertiesEditor = (
@@ -141,8 +114,9 @@ const Gait = ({
               value={fov || ''}
               placeholder='55'
               onChange={e => {
-                const v = +e.target.value;
-                setGlobalFieldofView(onFieldChange, v, task);
+                const v = e.target.value === '' ? null : +e.target.value;
+                setTaskGlobals({ field_of_view: v });
+                onFieldChange(v, 'field_of_view', task);
               }}
             />
             <Tooltip
@@ -164,8 +138,9 @@ const Gait = ({
             className="border border-zinc-500 rounded-lg bg-transparent p-1 pl-2 py-1.5 w-20 text-left text-gray-100 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&input[type=number]]:appearance-none"
             value={sensorWidth || ''}
             onChange={e => {
-              const v = +e.target.value;
-              setGlobalSensorWidth(onFieldChange, v, task);
+              const v = e.target.value === '' ? null : +e.target.value;
+              setTaskGlobals({ sensor_width: v });
+              onFieldChange(v, 'sensor_width', task);
             }}
           />
           <Tooltip
@@ -187,8 +162,9 @@ const Gait = ({
             className="border border-zinc-500 rounded-lg bg-transparent p-1 pl-2 py-1.5 w-20 text-left text-gray-100 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&input[type=number]]:appearance-none"
             value={sensorHeight || ''}
             onChange={e => {
-              const v = +e.target.value;
-              setGlobalSensorHeight(onFieldChange, v, task);
+              const v = e.target.value === '' ? null : +e.target.value;
+              setTaskGlobals({ sensor_height: v });
+              onFieldChange(v, 'sensor_height', task);
             }}
           />
           <Tooltip
@@ -210,8 +186,9 @@ const Gait = ({
             className="border border-zinc-500 rounded-lg bg-transparent p-1 pl-2 py-1.5 w-20 text-left text-gray-100 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&input[type=number]]:appearance-none"
             value={fl || ''}
             onChange={e => {
-              const v = +e.target.value;
-              setGlobalFocalLength(onFieldChange, v, task);
+              const v = e.target.value === '' ? null : +e.target.value;
+              setTaskGlobals({ focal_length: v });
+              onFieldChange(v, 'focal_length', task);
             }}
           />
           <Tooltip
@@ -251,11 +228,12 @@ const Gait = ({
                       step="any"
                       className="border border-zinc-500 bg-transparent rounded-lg p-1 w-16 text-gray-100 text-center [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&input[type=number]]:appearance-none"
                       value={val}
-                      onChange={e => {
-                        const newVal = e.target.value === '' ? '' : Number(e.target.value);
-                        const newMatrix = intrinsicMatrix.map(r => [...r]);
+                      onChange={(e) => {
+                        const newVal = e.target.value === '' ? null : +e.target.value;
+                        const newMatrix = intrinsicMatrix.map((r) => [...r]);
                         newMatrix[i][j] = newVal;
-                        setGlobalIntrinsicMatrix(onFieldChange, newMatrix, task);
+                        setTaskGlobals({ intrinsic_matrix: newMatrix });
+                        onFieldChange(newMatrix, 'intrinsic_matrix', task);
                       }}
                     />
                   ))
@@ -293,11 +271,12 @@ const Gait = ({
                       step="any"
                       className="border border-zinc-500 bg-transparent rounded-lg p-1 w-16 text-gray-100 text-center [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&input[type=number]]:appearance-none"
                       value={val}
-                      onChange={e => {
-                        const newVal = e.target.value === '' ? '' : Number(e.target.value);
-                        const newMatrix = extrinsicMatrix.map(r => [...r]);
+                      onChange={(e) => {
+                        const newVal = e.target.value === '' ? null : +e.target.value;
+                        const newMatrix = extrinsicMatrix.map((r) => [...r]);
                         newMatrix[i][j] = newVal;
-                        setGlobalExtrinsicMatrix(onFieldChange, newMatrix, task);
+                        setTaskGlobals({ extrinsic_matrix: newMatrix });
+                        onFieldChange(newMatrix, 'extrinsic_matrix', task);
                       }}
                     />
                   ))
@@ -323,6 +302,7 @@ const Gait = ({
               onFieldChange(extrinsicMatrix, 'extrinsic_matrix', task);
               onFieldChange(sensorWidth, 'sensor_width', task);
               onFieldChange(sensorHeight, 'sensor_height', task);
+              onFieldChange(fov, 'field_of_view', task);
               setShowCameraProperties(false);
             }}
           >
@@ -450,9 +430,10 @@ const Gait = ({
                     inputMode="numeric"
                     pattern="[0-9]*"
                     placeholder="150"
-                    onChange={e => {
-                      const v = +e.target.value;
-                      setGlobalHeight(onFieldChange, v, task);
+                    onChange={(e) => {
+                      const v = e.target.value === '' ? null : +e.target.value;
+                      setTaskGlobals({ height: v });
+                      onFieldChange(v, 'height', task);
                     }}
                     value={h || ''}
                   />
