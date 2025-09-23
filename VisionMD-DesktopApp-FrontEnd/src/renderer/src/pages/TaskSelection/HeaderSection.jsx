@@ -43,7 +43,7 @@ const HeaderSection = ({
   
   return (
     <div className="flex px-4 items-center justify-between bg-zinc-900 z-1 shadow-lg py-1 relative">
-      <Typography className="text-gray-100">
+      <Typography className="text-gray-100" fontWeight="500">
         {title}
       </Typography>
 

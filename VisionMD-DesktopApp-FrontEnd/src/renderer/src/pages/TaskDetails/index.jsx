@@ -18,8 +18,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CircularProgress from '@mui/material/CircularProgress';
-import js from '@eslint/js';
-
+import Typography from '@mui/material/Typography';
 
 const TaskDetails = () => {
   const {
@@ -38,13 +37,18 @@ const TaskDetails = () => {
     setTasks,
     persons,
   } = useContext(VideoContext);
+  
 
   const [openJsonUpload, setOpenJsonUpload] = useState(false);
   const [analyzingAll, setAnalyzingAll] = useState(false);
   const [selectedTask, setSelectedTask] = useState(0);
   const [TaskModule, setTaskModule] = useState(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [taskErrors, setTaskErrors] = useState({});
   const dropdownRef = useRef(null);
+
+  console.log("Tasks", tasks)
+  console.log("taskErrors",taskErrors)
 
   const navigate = useNavigate();
 
@@ -98,82 +102,109 @@ const TaskDetails = () => {
       newTasks[selectedTask] = { ...newTasks[selectedTask], data: null };
       return newTasks;
     });
-  };
-
-  const autoAnalyzeTask = async taskIndex => {
-    const videoURL = videoRef.current.src;
-    const videoBlob = await fetch(videoURL).then(r => r.blob());
-
-    const taskData = tasks[taskIndex];
-    const chosenTaskBox = tasks.find(box => box.id === taskData.id);
-    const taskBoxCords = {
-      x: chosenTaskBox.x,
-      y: chosenTaskBox.y,
-      width: chosenTaskBox.box_width,
-      height: chosenTaskBox.box_height,
-    };
-
-    const subjectBoundingBoxes = boundingBoxes
-      .map(({ frameNumber, data }) => ({
-        frameNumber,
-        data: data.filter(item => item.Subject === true)
-    }))
-
-    const { start, end, name, data, ...otherTaskFields } = taskData;
-    let jsonData = {
-      boundingBox: taskBoxCords,
-      task_name: taskData.name,
-      start_time: taskData.start,
-      end_time: taskData.end,
-      fps: fps,
-      subject_bounding_boxes: subjectBoundingBoxes,
-      ...otherTaskFields,
-    };
-    jsonData = JSON.stringify(jsonData);
-      
-
-    let form = new FormData();
-    form.append('video', videoBlob);
-    form.append('json_data', jsonData);
-
-    const sanitizedTaskName = name
-      .replace(/[^a-zA-Z0-9]+/g, ' ')
-      .split(' ')
-      .filter(Boolean)
-      .map(w => w.toLowerCase())
-      .join('_');
-
-    const apiURL = `http://localhost:8000/api/${sanitizedTaskName}/?id=${videoId}`;
-
-    console.log("API URL Generated as:", apiURL);
-    console.log("Upload data", JSON.parse(jsonData));
-
-    const res = await fetch(apiURL, { method: 'POST', body: form });
-    if (!res.ok) throw new Error(`${name} failed with status ${res.status}`);
-
     
-    const result = await res.json();
-    const safeFileName = fileName.replace(/\.[^/.]+$/, '');
+    const currentTask = tasks?.[selectedTask];
+    const currentTaskId = currentTask?.id;
 
-    setTasks(prev => {
-      const next = [...prev];
-      next[taskIndex] = {
-        ...next[taskIndex],
-        data: { ...result, fileName: safeFileName },
-      };
-      return next;
+    setTaskErrors(prev => {
+      const { [currentTaskId]: _omit, ...rest } = prev;
+      return rest;
     });
   };
 
+  
+  const clearTaskError = (taskId) => {
+    setTaskErrors(prev => {
+      const { [taskId]: _omit, ...rest } = prev;
+      return rest;
+    });
+  };
+
+  const autoAnalyzeTask = async taskId => {
+    try {
+      const videoURL = videoRef.current.src;
+      const videoBlob = await fetch(videoURL).then(r => r.blob());
+      const taskData = tasks.find(t => t.id === taskId);
+      if (!taskData) throw new Error(`Task with id ${taskId} not found`);
+
+      const chosenTaskBox = tasks.find(box => box.id === taskData.id);
+      const taskBoxCords = {
+        x: chosenTaskBox.x,
+        y: chosenTaskBox.y,
+        width: chosenTaskBox.box_width,
+        height: chosenTaskBox.box_height,
+      };
+
+      const subjectBoundingBoxes = boundingBoxes.map(({ frameNumber, data }) => ({
+        frameNumber,
+        data: data.filter(item => item.Subject === true),
+      }));
+
+      const { start, end, name, data, ...otherTaskFields } = taskData;
+      let jsonData = {
+        boundingBox: taskBoxCords,
+        task_name: name,
+        start_time: start,
+        end_time: end,
+        fps,
+        subject_bounding_boxes: subjectBoundingBoxes,
+        ...otherTaskFields,
+      };
+      jsonData = JSON.stringify(jsonData);
+
+      const form = new FormData();
+      form.append("video", videoBlob);
+      form.append("json_data", jsonData);
+
+      const sanitizedTaskName = name
+        .replace(/[^a-zA-Z0-9]+/g, " ")
+        .split(" ")
+        .filter(Boolean)
+        .map(w => w.toLowerCase())
+        .join("_");
+
+      const apiURL = `http://localhost:8000/api/${sanitizedTaskName}/?id=${videoId}`;
+
+      const res = await fetch(apiURL, { method: "POST", body: form });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`${name} failed (${res.status})${text ? `: ${text}` : ""}`);
+      }
+
+      const result = await res.json();
+      const safeFileName = fileName.replace(/\.[^/.]+$/, "");
+
+      setTasks(prev =>
+        prev.map(t =>
+          t.id === taskId
+            ? { ...t, data: { ...result, fileName: safeFileName } }
+            : t
+        )
+      );
+
+      setTaskErrors(prev => {
+        const { [taskId]: _remove, ...rest } = prev;
+        return rest;
+      });
+
+      return true;
+    } catch (err) {
+      console.error(err);
+      setTaskErrors(prev => ({
+        ...prev,
+        [taskId]: err?.message || "Unknown error",
+      }));
+      return false;
+    }
+  };
+
   const analyzeAllTasks = async () => {
+    setTaskErrors({});
     setAnalyzingAll(true);
-    for (let i = 0; i < tasks.length; i++) {
-      if (!tasks[i]?.data) {
-        try {
-          await autoAnalyzeTask(i);
-        } catch (err) {
-          console.error(err);
-        }
+
+    for (const task of tasks) {
+      if (!task?.data) {
+        await autoAnalyzeTask(task.id);
       }
     }
     setAnalyzingAll(false);
@@ -214,6 +245,11 @@ const TaskDetails = () => {
     'bg-[#1976d2] hover:bg-[#1565c0] text-white px-3 py-1 ' +
     'rounded-md inline-flex items-center gap-1 ' +
     'disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap';
+
+  const currentTask = tasks?.[selectedTask];
+  const currentTaskId = currentTask?.id;
+  const currentTaskError = currentTaskId ? taskErrors[currentTaskId] : null;
+  const hasData = Boolean(currentTask?.data);
 
   return (
     <div className="flex flex-col h-screen">
@@ -315,55 +351,77 @@ const TaskDetails = () => {
             >
               Analyze All
             </button>
-
-            {analyzingAll && (
-              <CircularProgress
-                size={28}
-                sx={{ color: '#2563eb'}}
-              />
-            )}
           </div>
 
-          {!tasks[selectedTask]?.data ? (
-            <div className="flex justify-center items-center text-gray-100 h-full flex-col gap-4 w-full px-10 flex-1 py-4 overflow-y-scroll">
-              <div>Analyze the task</div>
-              <button
-                className={`${btn} text-base`}
-                onClick={() => setOpenJsonUpload(true)}
-              >
-                Analyze
-              </button>
-              <JSONUploadDialog
-                dialogOpen={openJsonUpload}
-                fps={fps}
-                setDialogOpen={setOpenJsonUpload}
-                handleJSONUpload={handleProcessing}
-                boundingBoxes={boundingBoxes}
-                videoRef={videoRef}
-                tasks={tasks}
-                selectedTask={selectedTask}
-              />
-            </div>
-          ) : (
-            <>
-              {TaskModule && (
+          <div className="flex-1 py-4 px-10 overflow-y-auto text-gray-100">
+            {currentTaskError ? (
+              <div className="flex justify-center items-center h-full flex-col gap-4">
+                <div> Analyze the task </div>
+                <button
+                  className={`${btn} text-base`}
+                  onClick={() => {
+                    clearTaskError(currentTaskId);
+                    setOpenJsonUpload(true);
+                  }}
+                >
+                  Analyze
+                </button>
+                <div className="max-h-48 overflow-y-auto">
+                  <Typography color="error">{currentTaskError}</Typography>
+                </div>
+              </div>
+            ) : hasData ? (
+              TaskModule ? (
                 <TaskModule
                   selectedTaskIndex={selectedTask}
                   tasks={tasks}
                   setTasks={setTasks}
                   fileName={fileName}
                   videoRef={videoRef}
-                  startTime={tasks[selectedTask].start}
-                  endTime={tasks[selectedTask].end}
+                  startTime={currentTask.start}
+                  endTime={currentTask.end}
                   handleJSONUpload={handleProcessing}
                 />
-              )}
-            </>
-          )}
+              ) : (
+                <div className="flex justify-center items-center h-full">
+                  Loading task view…
+                </div>
+              )
+            ) : analyzingAll ? (
+              <div className="flex justify-center items-center h-full flex-col gap-4">
+                <div>Analyzing task...</div>
+                <CircularProgress size={64} sx={{ color: '#2563eb' }} />
+              </div>
+            ) : (
+              <div className="flex justify-center items-center h-full flex-col gap-4">
+                <div>Analyze the task</div>
+                <button
+                  className={`${btn} text-base`}
+                  onClick={() => setOpenJsonUpload(true)}
+                >
+                  Analyze
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Keep the dialog mounted so it can open from any state */}
+          <JSONUploadDialog
+            dialogOpen={openJsonUpload}
+            fps={fps}
+            setDialogOpen={setOpenJsonUpload}
+            handleJSONUpload={handleProcessing}
+            boundingBoxes={boundingBoxes}
+            videoRef={videoRef}
+            tasks={tasks}
+            selectedTask={selectedTask}
+            analyzingAll={analyzingAll}
+          />
         </div>
       </div>
     </div>
   );
 };
+
 
 export default TaskDetails;

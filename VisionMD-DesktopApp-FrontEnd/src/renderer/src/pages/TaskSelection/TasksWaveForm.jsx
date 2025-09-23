@@ -18,6 +18,8 @@ const TasksWaveForm = ({
   const tasksRef = useRef(tasks);
 
   const [waveSurferReady, setWaveSurferReady] = useState(false);
+  const [loadPercent, setLoadPercent] = useState(0)
+  const [waveLoading, setWaveLoading] = useState(false);
   useEffect(() => {
     tasksRef.current = tasks;
   }, [tasks]);
@@ -50,10 +52,17 @@ const TasksWaveForm = ({
     waveSurferRef.current = ws;
     regionsPluginRef.current = ws.registerPlugin(RegionsPlugin.create());
     regionsPluginRef.current.enableDragSelection({});
+
+    ws.on('loading', percent => {
+      setLoadPercent(percent);
+      setWaveLoading(true);
+    });
+
     ws.on('ready', () => {
       const duration = videoRef.current.duration || 1;
       ws.zoom(670 / duration);
       setWaveSurferReady(true);
+      setWaveLoading(false);
     });
 
 
@@ -158,7 +167,11 @@ const TasksWaveForm = ({
     <div className="flex flex-col justify-center items-center w-full pt-6 p-2">
       <div className="flex flex-col w-full p-4 rounded-lg bg-[#333338]">
         <div className="w-full flex items-center justify-between pb-2 border-b-2 border-zinc-500">
-          <div className="text-left text-gray-100">Waveform</div>
+          <div className="text-left text-gray-100">
+            {waveLoading
+                ? `Loading Waveform: ${Math.round(loadPercent)}%...`
+                : 'Waveform'}
+          </div>
           <Slider
             orientation="horizontal"
             min={1}

@@ -36,44 +36,38 @@ const HeaderSection = ({
       </Typography>
 
       <div className="flex gap-3 items-center">
-        <span title="Go Back">
-          <Tooltip
-            arrow
-            title="Go Back"
-          >
-          <NavigateBefore
-            onClick={() => navigate('/')}
-            className="cursor-pointer text-white hover:text-gray-300"
-            fontSize="medium"
-          />
-          </Tooltip>
-        </span>
+        <Tooltip
+          arrow
+          title="Go Back"
+        >
+        <NavigateBefore
+          onClick={() => navigate('/')}
+          className="cursor-pointer text-white hover:text-gray-300"
+          fontSize="medium"
+        />
+        </Tooltip>
 
-        <span title="Download Config">
-          <Tooltip
-            arrow
-            title="Download Config"
-          >
-          <Download
-            onClick={boundingBoxes?.length === 0 ? undefined : downloadConfig}
-            className={`cursor-pointer ${boundingBoxes.length === 0 ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
-            fontSize="small"
-          />
-          </Tooltip>
-        </span>
-        
-        <span title="Go Forward">
-          <Tooltip
-            arrow
-            title="Go Forward"
-          >
-          <NavigateNext
-            onClick={boundingBoxes?.length === 0 ? undefined : moveToNextScreen}
-            className={`cursor-pointer ${boundingBoxes.length === 0 ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
-            fontSize="medium"
-          />
-          </Tooltip>
-        </span>
+        <Tooltip
+          arrow
+          title="Download Config"
+        >
+        <Download
+          onClick={boundingBoxes?.length === 0 ? undefined : downloadConfig}
+          className={`cursor-pointer ${boundingBoxes.length === 0 ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
+          fontSize="small"
+        />
+        </Tooltip>
+      
+        <Tooltip
+          arrow
+          title="Go Forward"
+        >
+        <NavigateNext
+          onClick={boundingBoxes?.length === 0 ? undefined : moveToNextScreen}
+          className={`cursor-pointer ${boundingBoxes.length === 0 ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
+          fontSize="medium"
+        />
+        </Tooltip>
       </div>
     </div>
   );
