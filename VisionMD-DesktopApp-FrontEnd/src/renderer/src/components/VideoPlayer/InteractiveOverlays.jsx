@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 
-const ResizeHandles = ({ x, y, width, height, onResize, item, index, handleSize = 12.5 }) => {
+const ResizeHandles = ({ x, y, width, height, onResize, item, index, handleSize = 12.5, strokeThickness }) => {
   const handles = [
     {
       side: 'top',
@@ -45,7 +45,7 @@ const ResizeHandles = ({ x, y, width, height, onResize, item, index, handleSize 
       height={handle.height}
       fill="#4A8074"
       stroke="white"
-      strokeWidth="2"
+      strokeWidth={strokeThickness/2}
       onPointerDown={(e) => onResize(e, item, index, handle.side)}
       style={{ cursor: handle.cursor }}
     />
@@ -65,6 +65,8 @@ const InteractiveOverlays = ({
   fps,
   isPlaying,
   videoRef,
+  displayWidth,
+  displayHeight,
 }) => {
   const svgRef = useRef(null);
   const resizingTaskRef = useRef(null);
@@ -309,7 +311,14 @@ const InteractiveOverlays = ({
     }
   }
 
-  const strokeThickness = 10;
+  const strokeThickness = 20 * Math.min(
+    displayWidth  / videoWidth,
+    displayHeight / videoHeight
+  ) / zoomLevel;
+  const landmarkRadius = 30 * Math.min(
+    displayWidth  / videoWidth,
+    displayHeight / videoHeight
+  ) / zoomLevel;
   return (
     <svg
       ref={svgRef}
@@ -349,6 +358,7 @@ const InteractiveOverlays = ({
               onResize={handleTaskResizeStart}
               item={taskToRender}
               index={taskIndex}
+              strokeThickness={strokeThickness}
             />
           )}
         </g>
@@ -376,10 +386,10 @@ const InteractiveOverlays = ({
                   key={`landmark-${idx}`}
                   cx={px}
                   cy={py}
-                  r={12.5}
+                  r={landmarkRadius}
                   fill={fillColor}
                   stroke="white"
-                  strokeWidth="2"
+                  strokeWidth={strokeThickness/2}
                   onPointerDown={(e) => handleLandmarkDragStart(e, idx)}
                   style={{ cursor: 'move' }}
                 />

@@ -10,8 +10,13 @@ const VideoDrawer = ({
   landMarks,
   selectedTask,
   style,
+  displayWidth,
+  displayHeight,
   screen = 'default',
   isPlaying,
+  zoomLevel,
+  videoWidth,
+  videoHeight,
 }) => {
   const canvasRef = useRef(null);
   const currentFrame = useRef(-1);
@@ -69,7 +74,7 @@ const VideoDrawer = ({
     }
   }, [videoRef]);
 
-  const drawBoundingBoxes = useCallback(() => {
+  const drawBoundingBoxes = useCallback((scaleRatio) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -88,14 +93,15 @@ const VideoDrawer = ({
         ctx.strokeStyle = persons.find((p) => p.id === box.id && p.isSubject)
           ? 'green'
           : 'red';
-        ctx.lineWidth = 10;
+        const strokeThickness = 20 * scaleRatio
+        ctx.lineWidth = strokeThickness;
         ctx.rect(x, y, width, height);
         ctx.stroke();
       });
     }
   }, [boundingBoxes, persons]);
 
-  const drawLandMarks = useCallback(() => {
+  const drawLandMarks = useCallback((scaleRatio) => {
     if (!tasks.length || selectedTask == null) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -115,8 +121,9 @@ const VideoDrawer = ({
     const colors3D = landmark_colors;
 
     // pre‐compute the crop offset
-    const offsetX = currentTask.x;
-    const offsetY = currentTask.y;
+    if (canvas.width === 0 || canvas.height === 0) return;
+    const radiusPx = 30 * scaleRatio
+    
     joints2D.forEach((pt, j) => {
       if (!pt || pt.length < 2) return;
       const [lx, ly] = pt;
@@ -131,10 +138,10 @@ const VideoDrawer = ({
       }
       ctx.fillStyle = fill;
       ctx.beginPath();
-      ctx.arc(lx , ly , 12.5, 0, 2 * Math.PI);
+      ctx.arc(lx , ly , radiusPx, 0, 2 * Math.PI);
       ctx.fill();
     });
-  }, [tasks, selectedTask, fps, landMarks, landmark_colors]);
+  }, [tasks, selectedTask, fps, landMarks, landmark_colors, displayWidth, displayHeight]);
 
 
   // Modified drawFrame: we only draw bounding boxes when not in a taskBox time interval.
@@ -151,19 +158,24 @@ const VideoDrawer = ({
 
       // Check if currentTime is within any taskBox's time window.
       const inTaskTime = tasks.some((task) => currentTime >= task.start && currentTime <= task.end);
+      const canvas = canvasRef.current;
+      const scaleRatio =  Math.min(
+        displayWidth  / videoWidth,
+        displayHeight / videoHeight
+      ) / zoomLevel;
       if (screen === 'subject_resolution') {
-        drawBoundingBoxes();
+        drawBoundingBoxes(scaleRatio);
       }
 
       if (screen === 'tasks' && !inTaskTime) {
-        drawBoundingBoxes();
+        drawBoundingBoxes(scaleRatio);
       }
 
       if (screen === 'taskDetails' && isPlaying) {
-        drawLandMarks();
+        drawLandMarks(scaleRatio);
       }
     },
-    [getFrameNumber, clearCanvas, drawVideoFrame, drawBoundingBoxes, drawLandMarks, landmark_colors, tasks, screen, isPlaying]
+    [getFrameNumber, clearCanvas, drawVideoFrame, drawBoundingBoxes, drawLandMarks, landmark_colors, tasks, screen, isPlaying, zoomLevel]
   );
 
   // Set canvas dimensions and start the continuous render loop.

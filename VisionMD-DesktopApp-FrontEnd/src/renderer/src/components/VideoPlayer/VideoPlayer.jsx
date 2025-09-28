@@ -37,16 +37,17 @@ const VideoPlayer = ({
   }, [currentFrame, isEditing]);
 
   useEffect(() => {
-    let animationFrameId;
-    const updateFrameNumber = () => {
-      if (videoRef.current) {
-        const frameNumber = Math.round(fps * videoRef.current.currentTime);
-        setCurrentFrame(frameNumber);
-      }
-      animationFrameId = requestAnimationFrame(updateFrameNumber);
+    const video = videoRef.current;
+    if (!video) return;
+    let frameCallbackId;
+
+    const updateFrameNumber = (now, metadata) => {
+      setCurrentFrame(metadata.presentedFrames);
+      frameCallbackId = video.requestVideoFrameCallback(updateFrameNumber);
     };
-    updateFrameNumber();
-    return () => cancelAnimationFrame(animationFrameId);
+
+    frameCallbackId = video.requestVideoFrameCallback(updateFrameNumber);
+    return () => video.cancelVideoFrameCallback(frameCallbackId);
   }, [videoRef, fps]);
 
   // Update container size on mount and on window resize.
@@ -245,6 +246,11 @@ const VideoPlayer = ({
                 selectedTask={selectedTask}
                 isPlaying={isPlaying}
                 screen={screen}
+                videoWidth={videoDimensions.width}
+                videoHeight={videoDimensions.height}
+                displayWidth={containerSize.width}
+                displayHeight={containerSize.height}
+                zoomLevel={zoomLevel}
                 style={{
                   position: 'absolute',
                   top: 0,
@@ -256,6 +262,7 @@ const VideoPlayer = ({
                   transformOrigin: 'center center',
                   background: 'transparent',
                 }}
+                
               />
               {boundingBoxes && (
                 <InteractiveOverlays
@@ -272,6 +279,8 @@ const VideoPlayer = ({
                   fps={fps}
                   videoRef={videoRef}
                   isPlaying={isPlaying}
+                  displayWidth={containerSize.width}
+                  displayHeight={containerSize.height}
                 />
               )}
             </div>
