@@ -208,7 +208,14 @@ export default function JSONUploadDialog({
             >
               Process with JSON
             </button>
-            <button className='rounded-md bg-[#1976d2] hover:bg-[#1565c0] p-1 px-2 text-gray-100' onClick={handleAutoProcess} disabled={serverProcessing}>
+            <button 
+              className='rounded-md bg-[#1976d2] hover:bg-[#1565c0] p-1 px-2 text-gray-100' 
+              onClick={() => {
+                setFileError("");
+                handleAutoProcess(); 
+              }}
+              disabled={serverProcessing}
+            >
               Auto Process
             </button>
           </div>

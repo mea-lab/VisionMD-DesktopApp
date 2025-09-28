@@ -14,7 +14,6 @@ const HeaderSection = ({ title }) => {
         {title}
       </Typography>
         
-      <span title="Go Back">
         <Tooltip
           arrow
           title='Go back'
@@ -25,7 +24,6 @@ const HeaderSection = ({ title }) => {
             fontSize="medium"
           />
         </Tooltip>
-      </span>
     </header>
   );
 };

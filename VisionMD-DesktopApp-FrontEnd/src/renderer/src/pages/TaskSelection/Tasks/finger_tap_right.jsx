@@ -19,6 +19,12 @@ const FingerTapRight = ({
     onFieldChange(selectedTask.value, 'name', task);
   };
 
+  useEffect(() => {
+    if (!task.norm_strategy) {
+      onFieldChange('INDEXSIZE', 'norm_strategy', task);
+    }
+  }, []);
+
   return (
     <div
       tabIndex={-1}

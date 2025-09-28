@@ -14,16 +14,16 @@ const HandMovementLeft = ({
   options,
 }) => {
   const [open, setOpen] = useState(true);
-  const renderCount = useRef(0);
-  renderCount.current += 1;
-
-  useEffect(() => {
-    console.log(`Rendered ${renderCount.current} times`);
-  });
 
   const handleTaskChange = selectedTask => {
     onFieldChange(selectedTask.value, 'name', task);
   };
+
+  useEffect(() => {
+    if (!task.norm_strategy) {
+      onFieldChange('INDEXSIZE', 'norm_strategy', task);
+    }
+  }, []);
 
   return (
     <div
