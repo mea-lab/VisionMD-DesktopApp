@@ -35,7 +35,7 @@ mac:
     - mas-dev
   category: public.app-category.utilities
   icon: resources/icon.icns
-  minimumSystemVersion: "12.0"
+  minimumSystemVersion: "14.0"
   binaries:
     - Contents/backend/serve_mac/serve_mac_container
     - Contents/backend/serve_mac/serve_mac
