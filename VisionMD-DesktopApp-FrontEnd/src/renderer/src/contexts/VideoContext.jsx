@@ -3,6 +3,7 @@ import React, { createContext, useState, useEffect, useRef } from 'react';
 export const VideoContext = createContext();
 import { useAutoSave } from '@/hooks/useAutoSave';
 import { isEqual } from "lodash";
+import { useNavigate } from 'react-router-dom';
 
 
 const API_URL = import.meta.env.VITE_API_BASE_URL;
@@ -26,6 +27,7 @@ export const VideoProvider = ({ children }) => {
     const [tasksReady, setTasksReady] = useState(false);
 
     const videoRef = useRef(null);
+    const navigate = useNavigate();
     
     // Auto save hook on video context enables auto saving on route changes and refreshes
     useAutoSave(
@@ -43,7 +45,11 @@ export const VideoProvider = ({ children }) => {
                 console.log("Video ID changed", videoId)
 
                 const data_response = await fetch(`${API_URL}/get_video_data/?id=${videoId}`);
-                if (!data_response.ok) throw new Error('Failed to fetch metadata');
+                if (!data_response.ok) {
+                    console.error("Bad response:", data_response.status, data_response.statusText);
+                    navigate("/");
+                    return
+                }
                 const data = await data_response.json();
 
                 const metadata = data.metadata;
@@ -67,6 +73,8 @@ export const VideoProvider = ({ children }) => {
                 }
             } catch (error) {
                 console.error('Error fetching video data on video project opening:\n', error);
+                navigate("/");
+                return
             }
         }
 

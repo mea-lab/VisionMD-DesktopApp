@@ -44,15 +44,19 @@ const VideoControls = ({ videoRef, isPlaying, fps }) => {
     switch (event.key) {
       case 'ArrowRight':
         changeVideoFrame(1);
+        event.preventDefault();
         break;
       case 'ArrowLeft':
         changeVideoFrame(-1);
+        event.preventDefault();
         break;
       case 'ArrowUp':
         changeVideoFrame(5);
+        event.preventDefault();
         break;
       case 'ArrowDown':
         changeVideoFrame(-5);
+        event.preventDefault();
         break;
       case ' ':
         playOrPause();

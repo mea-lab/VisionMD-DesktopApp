@@ -30,6 +30,8 @@ const VideoPlayer = ({
   const [isEditing, setIsEditing] = useState(false);
   const [currentFrame, setCurrentFrame] = useState(0);
 
+  const getFrameFromMediaTime = (time, fps) => Math.floor(time * fps + 1e-7)
+
   useEffect(() => {
     if (!isEditing) {
       setFrameInput(currentFrame);
@@ -41,13 +43,17 @@ const VideoPlayer = ({
     if (!video) return;
     let frameCallbackId;
 
-    const updateFrameNumber = (now, metadata) => {
-      setCurrentFrame(metadata.presentedFrames);
-      frameCallbackId = video.requestVideoFrameCallback(updateFrameNumber);
+    const updateFrameNumber = () => {
+      const video = videoRef.current;
+      if (!video) return;
+
+      const frameIdx = getFrameFromMediaTime(video.currentTime, fps);
+      setCurrentFrame(frameIdx);
+
+      video.requestVideoFrameCallback(updateFrameNumber);
     };
 
     frameCallbackId = video.requestVideoFrameCallback(updateFrameNumber);
-    return () => video.cancelVideoFrameCallback(frameCallbackId);
   }, [videoRef, fps]);
 
   // Update container size on mount and on window resize.
@@ -101,7 +107,7 @@ const VideoPlayer = ({
 
   const getTotalFrameCount = () => {
     if (videoRef.current && !isNaN(videoRef.current.duration)) {
-      return Math.round(fps * videoRef.current.duration);
+      return Math.ceil(videoRef.current.duration * fps - 1e-6);
     }
     return 0;
   };
@@ -190,7 +196,7 @@ const VideoPlayer = ({
                   const newFrame = Number(frameInput);
                   if (!isNaN(newFrame) && videoRef.current) {
                     videoRef.current.currentTime = newFrame / fps;
-                    setCurrentFrame(newFrame);
+                    setCurrentFrame(Math.floor(videoRef.current.currentTime * fps + 1e-7));
                   }
                 }}
                 onKeyDown={(e) => {

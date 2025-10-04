@@ -429,7 +429,6 @@ const Gait = ({
                     type="text"
                     inputMode="numeric"
                     pattern="[0-9]*"
-                    placeholder="150"
                     onChange={(e) => {
                       const v = e.target.value === '' ? null : +e.target.value;
                       setTaskGlobals({ height: v });
