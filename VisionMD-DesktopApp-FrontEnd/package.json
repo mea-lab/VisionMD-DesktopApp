@@ -1,7 +1,7 @@
 {
   "name": "visionmd",
   "main": "out/main/index.js",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "A user friendly, open-source software tool designed to automate video-based kinematic analysis of motor tasks for assessment of motor dysfunction in movement disorders.",
   "author": "VisionMD",
   "private": true,
