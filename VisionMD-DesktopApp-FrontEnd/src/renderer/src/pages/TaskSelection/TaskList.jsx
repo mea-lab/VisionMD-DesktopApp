@@ -34,7 +34,7 @@ const TaskList = ({
       fieldName === 'start' || fieldName === 'end'
         ? Number(Number(newValue).toFixed(3))
         : newValue;
-    onTaskChange({ id: task.id, [fieldName]: value });
+    onTaskChange({ id: task.id, [fieldName]: value, data: null });
   };
 
   const onTimeMark = (fieldName, task) => {

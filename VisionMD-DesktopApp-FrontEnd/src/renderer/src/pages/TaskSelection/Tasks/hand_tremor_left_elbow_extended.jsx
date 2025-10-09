@@ -1,4 +1,3 @@
-// src/components/Gait.jsx
 import React, { useState, useRef, useEffect, useSyncExternalStore } from 'react';
 import IconButton from '@mui/material/IconButton';
 import Collapse from '@mui/material/Collapse';

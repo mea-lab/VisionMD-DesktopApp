@@ -145,6 +145,7 @@ export default function JSONUploadDialog({ dialogOpen, setDialogOpen, handleJSON
         sx: {
           backgroundColor: '#333338',
           borderRadius: 3,
+          minWidth: 400,
         },
       }}
     >

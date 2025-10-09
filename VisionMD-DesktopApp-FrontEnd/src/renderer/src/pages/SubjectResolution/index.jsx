@@ -31,11 +31,11 @@ const SubjectResolution = () => {
   } = useContext(VideoContext);
 
   const navigate = useNavigate();
-  if(!videoId) {
-    navigate("/")
-  }
-
-  const isSubject = id => persons.find(p => p.id === id)?.isSubject;
+  useEffect(() => {
+    if(!videoId) {
+      navigate("/")
+    }
+  },[])
 
   const moveToNextScreen = () => {
     navigate('/tasks');

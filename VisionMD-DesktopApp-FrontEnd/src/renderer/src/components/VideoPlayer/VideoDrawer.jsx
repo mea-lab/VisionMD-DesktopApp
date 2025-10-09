@@ -108,8 +108,7 @@ const VideoDrawer = ({
     const ctx = canvas.getContext('2d');
 
     const currentTask = tasks[selectedTask];
-    // compute the frame‐index relative to the start of this task
-    const startFrame = Math.floor(currentTask.start * fps);
+    const startFrame = Math.round(currentTask.start * fps);
     const frameIndex = currentFrame.current - startFrame;
     if (
       frameIndex < 0 ||
@@ -149,6 +148,7 @@ const VideoDrawer = ({
       const video = videoRef.current;
       if (!video) return;
       const frameNumber = getFrameNumber(currentTime);
+      // console.log("Drawer frame: " + frameNumber)
       lastDrawnFrame.current = frameNumber;
       currentFrame.current = frameNumber;
 

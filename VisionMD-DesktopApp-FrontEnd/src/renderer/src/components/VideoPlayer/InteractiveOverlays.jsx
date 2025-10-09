@@ -88,8 +88,9 @@ const InteractiveOverlays = ({
     let frameCallbackId;
     const updateFrame = (now, metadata) => {
       const frame = Math.round(metadata.mediaTime * fps);
+      // console.log("Interactive frame: " + frame)
       setCurrentFrame(frame);
-      const offset = Math.floor((tasks[selectedTask]?.start ?? 0) * fps);
+      const offset = Math.round((tasks[selectedTask]?.start ?? 0) * fps);
       setLandMarkIndex(frame - offset);
       frameCallbackId = video.requestVideoFrameCallback(updateFrame);
     };

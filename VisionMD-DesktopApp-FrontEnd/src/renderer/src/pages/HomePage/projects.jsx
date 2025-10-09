@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { VideoContext } from "../../contexts/VideoContext";
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import CircularProgress from '@mui/material/CircularProgress';
+import JSONUploadDialog from './JSONUploadDialog';
 
 const BASE_URL = import.meta.env.VITE_BASE_URL;
 dayjs.extend(relativeTime);
@@ -33,7 +34,10 @@ const uploadVideo = async (file) => {
     method: 'POST',
     body: form,
   });
-  if (!res.ok) throw new Error('Upload failed');
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Server responded with ${res.status} error:\n ${errorText}`);
+  }
   return res.json();
 }
 
@@ -146,19 +150,20 @@ const VideoTile = ({ video, setVideos }) => {
     <div 
       className="relative group rounded-lg hover:bg-gray-700 bg-surfaceElevated p-4 flex flex-col overflow-hidden h-full"
     >
-        <button
-          onClick={handleDeleteClick}
-          className="absolute z-10 top-2 right-2 opacity-0 group-hover:opacity-100 bg-gray-700 rounded-full text-white inline-flex items-center justify-center"
-        >
-          <HighlightOffIcon className="text-white hover:text-gray-400 transition-colors duration-200" fontSize="small" />
-        </button>
+      <button
+        onClick={handleDeleteClick}
+        className="absolute z-10 top-2 right-2 opacity-0 group-hover:opacity-100 bg-gray-700 rounded-full text-white inline-flex items-center justify-center"
+      >
+        <HighlightOffIcon className="text-white hover:text-gray-400 transition-colors duration-200" fontSize="small" />
+      </button>
+      
+      <img
+        src={`${BASE_URL}${video.metadata.thumbnail_url}?t=${video.metadata.last_edited}`}
+        className="rounded-lg w-full aspect-video object-contain cursor-pointer"
+        alt={`Thumbnail for ${video.metadata.video_name}`}
+        onClick={() => openVideoProject()}
+      />
 
-        <img
-          src={`${BASE_URL}${video.metadata.thumbnail_url}?t=${video.metadata.last_edited}`}
-          className="rounded-lg w-full aspect-video object-contain cursor-pointer"
-          alt={`Thumbnail for ${video.metadata.video_name}`}
-          onClick={() => openVideoProject()}
-        />
       <div className="flex items-center mt-2">
         {editing ? (
           <div className='flex flex-row w-full items-start justify-items-start'>
@@ -201,6 +206,8 @@ const VideoTile = ({ video, setVideos }) => {
 export default function Projects() {
   const [videos, setVideos] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
   const fileInputRef = useRef();
   const fetchedProjects = useRef(false);
 
@@ -218,13 +225,16 @@ export default function Projects() {
   const handleAddClick = () => fileInputRef.current.click();
 
   const handleFiles = async e => {
+    setDialogOpen(true);
     const file = e.target.files[0];
 
     if (!file) return;
     try {
       const response_metadata = await uploadVideo(file);
       setVideos(v => [response_metadata, ...(v ?? [])]);
+      setDialogOpen(false);
     } catch(error) {
+      setUploadError(error.message || String(error));
       console.error('Video upload failed:', error);
     } finally {
       e.target.value = null; 
@@ -232,9 +242,9 @@ export default function Projects() {
   };
 
   return (
-    <div className='h-full'>
+    <div>
       {loading && !videos && (
-        <div className="flex items-center justify-center h-full">
+        <div className="flex items-center justify-center h-screen">
           <CircularProgress className='my-4' size={64} />
         </div>
       )}
@@ -265,6 +275,14 @@ export default function Projects() {
           </>
         )}
       </div>
+      {dialogOpen && (
+        <JSONUploadDialog
+          dialogOpen={dialogOpen}
+          setDialogOpen={setDialogOpen}
+          uploadError={uploadError}
+          setUploadError={setUploadError}
+        />
+      )}
     </div>
   );
 }

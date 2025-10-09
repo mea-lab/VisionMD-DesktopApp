@@ -14,6 +14,9 @@ const HeaderSection = ({
   fileName,
 }) => {
   const navigate = useNavigate();
+  console.log("persons", persons)
+  const notProceed = (persons.length === 0 || boundingBoxes === 0 || persons.every(p => p.isSubject == false));
+
 
   const downloadConfig = () => {
     const data = { fps, boundingBoxes, persons };
@@ -52,8 +55,8 @@ const HeaderSection = ({
           title="Download Config"
         >
         <Download
-          onClick={boundingBoxes?.length === 0 ? undefined : downloadConfig}
-          className={`cursor-pointer ${boundingBoxes.length === 0 ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
+          onClick={notProceed ? undefined : downloadConfig}
+          className={`cursor-pointer ${notProceed ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
           fontSize="small"
         />
         </Tooltip>
@@ -63,8 +66,8 @@ const HeaderSection = ({
           title="Go Forward"
         >
         <NavigateNext
-          onClick={boundingBoxes?.length === 0 ? undefined : moveToNextScreen}
-          className={`cursor-pointer ${boundingBoxes.length === 0 ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
+          onClick={notProceed ? undefined : moveToNextScreen}
+          className={`cursor-pointer ${notProceed ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
           fontSize="medium"
         />
         </Tooltip>

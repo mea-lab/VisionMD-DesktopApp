@@ -7,6 +7,7 @@ import Slider from '@mui/material/Slider';
 const TasksWaveForm = ({
   videoRef,
   tasks,
+  fps,
   onTaskCreate,
   onTaskChange,
   isVideoReady,
@@ -90,7 +91,7 @@ const TasksWaveForm = ({
       };
 
       onTaskCreate(newTask);
-      if (videoRef.current) videoRef.current.currentTime = start + 0.05;
+      if (videoRef.current) videoRef.current.currentTime = start + 1 / fps;
     });
 
 
@@ -118,7 +119,7 @@ const TasksWaveForm = ({
       onTaskChange(updatedTask);
       if (videoRef.current) {
         videoRef.current.currentTime =
-          Math.abs(original.start - start) > 0.001 ? start + 0.05 : end - 0.05;
+          Math.abs(original.start - start) > 0.001 ? start + 1 / fps : end - 1 / fps;
       }
     });
 
@@ -159,6 +160,8 @@ const TasksWaveForm = ({
 
   const handleZoom = (_, zoom) => {
     if (!waveSurferReady) return;
+    setZoomLevel(zoom)
+    console.log(zoom)
     const duration = videoRef.current?.duration || 1;
     waveSurferRef.current.zoom((670 / duration) * zoom);
   };

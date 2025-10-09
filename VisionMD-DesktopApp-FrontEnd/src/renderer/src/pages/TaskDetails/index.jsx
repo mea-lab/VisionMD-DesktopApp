@@ -38,7 +38,7 @@ const TaskDetails = () => {
     persons,
   } = useContext(VideoContext);
   
-
+  const navigate = useNavigate();
   const [openJsonUpload, setOpenJsonUpload] = useState(false);
   const [analyzingAll, setAnalyzingAll] = useState(false);
   const [selectedTask, setSelectedTask] = useState(0);
@@ -47,10 +47,11 @@ const TaskDetails = () => {
   const [taskErrors, setTaskErrors] = useState({});
   const dropdownRef = useRef(null);
 
-  console.log("Tasks", tasks)
-  console.log("taskErrors",taskErrors)
-
-  const navigate = useNavigate();
+  useEffect(() => {
+    if(!videoId) {
+      navigate("/")
+    }
+  },[])
 
   useEffect(() => {
     const handleClickOutside = e => {
@@ -63,11 +64,9 @@ const TaskDetails = () => {
       document.removeEventListener('mousedown', handleClickOutside);
   }, [dropdownOpen]);
 
-  /* load per-task module */
   useEffect(() => {
     if (!videoReady) return;
     if (!tasks || !tasks[selectedTask]) return;
-    if (!videoId) navigate('/');
 
     const task = tasks[selectedTask];
     const taskName = task.name;

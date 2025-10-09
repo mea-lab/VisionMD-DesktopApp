@@ -1,10 +1,8 @@
 import Download from '@mui/icons-material/Download';
 import NavigateNext from '@mui/icons-material/NavigateNext';
 import NavigateBefore from '@mui/icons-material/NavigateBefore';
-import useTheme from '@mui/material/styles/useTheme';
 import Typography from '@mui/material/Typography';
 import Tooltip from '@mui/material/Tooltip';
-
 import { useNavigate } from 'react-router-dom';
 
 
@@ -17,9 +15,11 @@ const HeaderSection = ({
   tasks,
 }) => {
   const navigate = useNavigate();
-  const theme = useTheme();
-  
-  
+  const notProceed = !(tasks.length > 0 && tasks.every(t => t.name != "Region"));
+  console.log("Tasks",tasks)
+  console.log("notProceed", notProceed)
+
+
   const downloadConfig = () => {
     const fileData = {
       fps: fps,
@@ -58,16 +58,16 @@ const HeaderSection = ({
 
         <Tooltip arrow title="Download Config">
           <Download
-            onClick={boundingBoxes.length === 0 ? undefined : downloadConfig}
-            className={`cursor-pointer ${boundingBoxes.length === 0 ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
+            onClick={notProceed ? undefined : downloadConfig}
+            className={`cursor-pointer ${notProceed ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
             fontSize="small"
           />
         </Tooltip>
         
         <Tooltip arrow title="Go Forward">
           <NavigateNext
-            onClick={boundingBoxes.length === 0 ? undefined : moveToNextScreen}
-            className={`cursor-pointer ${boundingBoxes.length === 0 ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
+            onClick={notProceed ? undefined : moveToNextScreen}
+            className={`cursor-pointer ${notProceed ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
             fontSize="medium"
           />
         </Tooltip>

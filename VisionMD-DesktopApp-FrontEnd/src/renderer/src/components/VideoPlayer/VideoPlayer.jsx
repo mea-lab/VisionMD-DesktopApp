@@ -90,7 +90,7 @@ const VideoPlayer = ({
     const { start, end } = tasks[selectedTask];
 
     // Jump to the beginning of the segment once
-    vid.currentTime = start;
+    vid.currentTime = start + 1 / fps;
     setIsPlaying(!vid.paused);
 
     const handleUpdate = () => {

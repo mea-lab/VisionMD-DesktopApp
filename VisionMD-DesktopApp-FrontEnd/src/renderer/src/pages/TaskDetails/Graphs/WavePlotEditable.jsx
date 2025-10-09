@@ -502,7 +502,7 @@ const WavePlotEditable = ({
               name: 'Peak values',
               type: 'scatter',
               mode: 'markers',
-              marker: { size: 10, color: '#41337A' },
+              marker: { size: 10, color: '#decd6dff' },
             },
             {
               y: currentData.valleys_start.data,

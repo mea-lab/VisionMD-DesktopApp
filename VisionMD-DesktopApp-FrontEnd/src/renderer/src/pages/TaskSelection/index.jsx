@@ -10,16 +10,26 @@ import { useNavigate } from 'react-router-dom';
 
 const TaskSelection = () => {
   const {
-    videoId, videoReady, setVideoReady, videoData, setVideoData, videoURL, setVideoURL,
-    videoRef, fileName, setFileName, boundingBoxes, setBoundingBoxes,
-    fps, setFPS, setTasks, tasks, tasksReady, setTasksReady,
-    persons, taskTypeData, setTaskTypeData
+    videoId,
+    videoRef,
+    persons,
+    videoReady, setVideoReady,
+    videoData, setVideoData,
+    videoURL, setVideoURL,
+    fileName, setFileName,
+    boundingBoxes, setBoundingBoxes,
+    fps, setFPS,
+    tasks, setTasks, 
+    tasksReady, setTasksReady,
+    taskTypeData, setTaskTypeData
   } = useContext(VideoContext);
 
   const navigate = useNavigate();
-  if (!videoId) {
-    navigate("/")
-  }
+  useEffect(() => {
+    if(!videoId) {
+      navigate("/")
+    }
+  },[])
 
   const updateTaskWithBox = task => {
     const startFrame = Math.ceil(task.start * fps);
@@ -122,6 +132,7 @@ const TaskSelection = () => {
             setTasks={setTasks}
             onTaskCreate={onTaskCreate}
             onTaskChange={onTaskChange}
+            fps={fps}
             videoRef={videoRef}
             isVideoReady={videoReady}
             tasksReady={tasksReady}

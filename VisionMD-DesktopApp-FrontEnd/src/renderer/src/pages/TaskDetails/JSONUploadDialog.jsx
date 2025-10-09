@@ -146,6 +146,7 @@ export default function JSONUploadDialog({
           sx: {
             backgroundColor: '#333338',
             borderRadius: 3,
+            minWidth: 400,
           },
        }}
       >
@@ -184,7 +185,11 @@ export default function JSONUploadDialog({
                   </label>
                 </div>
                 <div className={fileError ? `mt-8` : ``}>
-                  {fileError && <Typography color="error">{fileError}</Typography>}
+                  {fileError && 
+                    <Typography color="error" sx={{ mt: 2, mb: 2, textAlign: 'left', whiteSpace: 'pre-line' }}>
+                      {fileError}
+                    </Typography>
+                  }
                 </div>
             </div>
             )}

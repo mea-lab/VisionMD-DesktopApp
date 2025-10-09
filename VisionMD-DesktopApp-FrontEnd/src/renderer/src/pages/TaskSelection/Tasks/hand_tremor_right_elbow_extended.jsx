@@ -1,4 +1,3 @@
-// src/components/Gait.jsx
 import React, { useState, useRef, useEffect, useSyncExternalStore } from 'react';
 import IconButton from '@mui/material/IconButton';
 import Collapse from '@mui/material/Collapse';
@@ -16,6 +15,8 @@ const HandTremorRightElbowExtended = ({
   onTimeMark,
   onTimeClick,
   options,
+  taskGlobals,
+  setTaskGlobals,
 }) => {
   const [open, setOpen] = useState(true);
   const taskSelectionRef = useRef(null);
