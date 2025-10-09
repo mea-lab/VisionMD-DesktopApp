@@ -56,6 +56,7 @@ function startDjangoServer() {
     detached: true,
     stdio: ['inherit'],
     shell: false,
+    windowsHide: true,
     env: {
       ...process.env,
       PATH: `${process.env.PATH}${path.delimiter}${basePath}`,
