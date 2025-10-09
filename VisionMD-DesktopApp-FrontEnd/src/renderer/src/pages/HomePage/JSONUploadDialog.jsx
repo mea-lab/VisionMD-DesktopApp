@@ -50,7 +50,7 @@ const JSONUploadDialog = ({
           ) : (
             <div className='flex flex-col w-full h-full justify-center items-center gap-5 text-gray-100'>
               <div>Video upload in progress</div>
-              <CircularProgress className='my-4' size={80} />
+              <CircularProgress className='my-8' size={80} />
             </div>
           )
         }
