@@ -1,6 +1,7 @@
 import Download from '@mui/icons-material/Download';
 import NavigateNext from '@mui/icons-material/NavigateNext';
 import NavigateBefore from '@mui/icons-material/NavigateBefore';
+import Home from '@mui/icons-material/Home'
 import Typography from '@mui/material/Typography';
 import Tooltip from '@mui/material/Tooltip';
 import { useNavigate } from 'react-router-dom';
@@ -16,9 +17,6 @@ const HeaderSection = ({
 }) => {
   const navigate = useNavigate();
   const notProceed = !(tasks.length > 0 && tasks.every(t => t.name != "Region"));
-  console.log("Tasks",tasks)
-  console.log("notProceed", notProceed)
-
 
   const downloadConfig = () => {
     const fileData = {
@@ -43,9 +41,18 @@ const HeaderSection = ({
   
   return (
     <div className="flex px-4 items-center justify-between bg-zinc-900 z-1 shadow-lg py-1 relative">
-      <Typography className="text-gray-100" fontWeight="500">
-        {title}
-      </Typography>
+      <div className="flex gap-3 items-center">
+        <Tooltip arrow title="Home">
+          <Home
+            onClick={() => navigate('/')}
+            className="cursor-pointer text-white hover:text-gray-300"
+            fontSize="small"
+          />
+        </Tooltip>
+        <Typography className="text-gray-100" fontWeight="500">
+          {title}
+        </Typography>
+      </div>
 
       <div className="flex gap-3 items-center">
         <Tooltip arrow title="Go Back">

@@ -93,7 +93,7 @@ const VideoDrawer = ({
         ctx.strokeStyle = persons.find((p) => p.id === box.id && p.isSubject)
           ? 'green'
           : 'red';
-        const strokeThickness = 20 * scaleRatio
+        const strokeThickness = 5 / scaleRatio
         ctx.lineWidth = strokeThickness;
         ctx.rect(x, y, width, height);
         ctx.stroke();
@@ -121,7 +121,7 @@ const VideoDrawer = ({
 
     // pre‐compute the crop offset
     if (canvas.width === 0 || canvas.height === 0) return;
-    const radiusPx = 30 * scaleRatio
+    const radiusPx = 5 / scaleRatio
     
     joints2D.forEach((pt, j) => {
       if (!pt || pt.length < 2) return;
@@ -162,7 +162,7 @@ const VideoDrawer = ({
       const scaleRatio =  Math.min(
         displayWidth  / videoWidth,
         displayHeight / videoHeight
-      ) / zoomLevel;
+      ) * zoomLevel;
       if (screen === 'subject_resolution') {
         drawBoundingBoxes(scaleRatio);
       }

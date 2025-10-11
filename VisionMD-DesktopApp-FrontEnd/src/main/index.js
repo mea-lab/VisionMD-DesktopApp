@@ -3,10 +3,6 @@ const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
-const kill = require('tree-kill');
-
-
-
 
 
 // --------------------------------------
@@ -17,9 +13,6 @@ const isDev = process.env.NODE_ENV === 'development';
 const isDevStatic = appEnv === 'dev_static';
 const isProd = process.env.NODE_ENV === 'production';
 let djangoProcess = null;
-
-
-
 
 
 // --------------------------------------
@@ -50,22 +43,18 @@ function startDjangoServer() {
   const djangoExecutable = path.join(basePath, executableName);
   console.log("Attempting to start django server from", djangoExecutable)
 
-
   djangoProcess = spawn(djangoExecutable, [], {
     cwd: basePath,
-    detached: true,
     stdio: ['inherit'],
     shell: false,
+    detached: false,
     windowsHide: true,
     env: {
       ...process.env,
       PATH: `${process.env.PATH}${path.delimiter}${basePath}`,
     },
   });
-
-  djangoProcess.unref();
 }
-
 
 function createWindow() {
   console.log("Dir root: ", __dirname)
@@ -95,7 +84,6 @@ function createWindow() {
   });
 }
 
-
 function waitForServer(url, timeout = 30000, interval = 500) {
   const startTime = Date.now();
 
@@ -119,20 +107,23 @@ function waitForServer(url, timeout = 30000, interval = 500) {
   });
 }
 
-
 function killDjangoProcess() {
   if (djangoProcess && djangoProcess.pid) {
     try {
-      kill(djangoProcess.pid, 'SIGTERM');
-      djangoProcess = null;
+      process.kill(djangoProcess.pid, 'SIGTERM');
+      setTimeout(() => {
+        try {
+          process.kill(djangoProcess.pid, 'SIGKILL');
+        } catch (e) {
+          console.warn('Failed to send SIGKILL, process might be killed already:', e);
+        }
+      }, 1)
     } catch (e) {
-      console.warn('Failed to kill Django process:', e);
+      process.kill(djangoProcess.pid, 'SIGKILL');
+      console.warn('Failed to kill Django process, sent one more SIGKILL before termination:', e);
     }
   }
 }
-
-
-
 
 
 // ------------------------------------
@@ -155,5 +146,14 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on('before-quit', killDjangoProcess);
 app.on('will-quit', killDjangoProcess);
+app.on('before-quit', killDjangoProcess);
+
+process.on('exit', killDjangoProcess);
+process.on('SIGINT', killDjangoProcess);
+process.on('SIGTERM', killDjangoProcess);
+process.on('uncaughtException', err => {
+  console.error('Fatal error:', err);
+  killDjangoProcess();
+  process.exit(1);
+});

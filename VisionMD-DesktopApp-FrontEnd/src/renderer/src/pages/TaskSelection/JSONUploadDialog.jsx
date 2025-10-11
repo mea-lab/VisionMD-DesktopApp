@@ -221,7 +221,7 @@ export default function JSONUploadDialog({
       <DialogActions>
         <div className='flex flex-row justify-between w-full p-2'>
           <button
-            className={`rounded-md p-1.5 ${(jsonContent === null || serverProcessing) ? "bg-transparent text-gray-500" : "bg-[#1976d2] hover:bg-[#1565c0] text-gray-100"}`}
+            className={`rounded-md p-1.5 ${(jsonContent === null) ? "bg-transparent text-gray-500" : "bg-[#1976d2] hover:bg-[#1565c0] text-gray-100"}`}
             onClick={handleJSONProcess} 
             disabled={jsonContent === null}
           >

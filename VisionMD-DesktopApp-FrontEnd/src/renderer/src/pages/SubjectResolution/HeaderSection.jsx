@@ -2,6 +2,7 @@ import Typography from '@mui/material/Typography';
 import Download from '@mui/icons-material/Download';
 import NavigateNext from '@mui/icons-material/NavigateNext';
 import NavigateBefore from '@mui/icons-material/NavigateBefore';
+import Home from '@mui/icons-material/Home'
 import { useNavigate } from 'react-router-dom';
 import Tooltip from '@mui/material/Tooltip';
 
@@ -14,7 +15,6 @@ const HeaderSection = ({
   fileName,
 }) => {
   const navigate = useNavigate();
-  console.log("persons", persons)
   const notProceed = (persons.length === 0 || boundingBoxes === 0 || persons.every(p => p.isSubject == false));
 
 
@@ -34,9 +34,18 @@ const HeaderSection = ({
 
   return (
     <div className="flex px-4 items-center justify-between bg-zinc-900 z-1 shadow-lg py-1 relative">
-      <Typography className="text-gray-100" fontWeight="500">
-        {title}
-      </Typography>
+      <div className="flex gap-3 items-center">
+        <Tooltip arrow title="Home">
+          <Home
+            onClick={() => navigate('/')}
+            className="cursor-pointer text-white hover:text-gray-300"
+            fontSize="small"
+          />
+        </Tooltip>
+        <Typography className="text-gray-100" fontWeight="500">
+          {title}
+        </Typography>
+      </div>
 
       <div className="flex gap-3 items-center">
         <Tooltip

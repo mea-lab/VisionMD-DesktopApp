@@ -312,11 +312,11 @@ const InteractiveOverlays = ({
     }
   }
 
-  const strokeThickness = 20 * Math.min(
+  const strokeThickness = 5 / Math.min(
     displayWidth  / videoWidth,
     displayHeight / videoHeight
   ) / zoomLevel;
-  const landmarkRadius = 30 * Math.min(
+  const landmarkRadius = 5 / Math.min(
     displayWidth  / videoWidth,
     displayHeight / videoHeight
   ) / zoomLevel;
