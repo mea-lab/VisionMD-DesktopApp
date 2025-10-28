@@ -160,8 +160,6 @@ const TasksWaveForm = ({
 
   const handleZoom = (_, zoom) => {
     if (!waveSurferReady) return;
-    setZoomLevel(zoom)
-    console.log(zoom)
     const duration = videoRef.current?.duration || 1;
     waveSurferRef.current.zoom((670 / duration) * zoom);
   };

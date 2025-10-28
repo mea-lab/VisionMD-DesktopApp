@@ -97,6 +97,20 @@ const VideoDrawer = ({
         ctx.lineWidth = strokeThickness;
         ctx.rect(x, y, width, height);
         ctx.stroke();
+
+        const personIdx = persons.findIndex((p) => p.id === box.id);
+        if (personIdx !== -1) {
+          const label = String(personIdx + 1);
+          const strokeThickness = ctx.lineWidth;
+
+          ctx.save();
+          ctx.fillStyle = "yellow";
+          ctx.font = `bold ${Math.round(4 * strokeThickness)}px system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`;
+          ctx.textBaseline = "top";
+          ctx.textAlign = "left";
+          ctx.fillText(label, x + strokeThickness * 0.5, y + strokeThickness * 0.5);
+          ctx.restore();
+        }
       });
     }
   }, [boundingBoxes, persons]);

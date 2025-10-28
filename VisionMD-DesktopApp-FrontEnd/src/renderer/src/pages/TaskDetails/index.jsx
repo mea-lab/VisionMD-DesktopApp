@@ -282,7 +282,7 @@ const TaskDetails = () => {
             boundingBoxes={boundingBoxes}
           />
 
-          <div className="flex items-center justify-center gap-2 mt-2 mb-4">
+          <div className="flex items-center justify-center gap-2 mt-2 mb-4 whitespace-nowrap">
             <div className="text-gray-100">Current task - </div>
 
             {/* task selector */}

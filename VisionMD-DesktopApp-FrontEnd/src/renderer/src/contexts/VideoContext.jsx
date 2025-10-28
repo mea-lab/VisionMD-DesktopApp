@@ -31,11 +31,18 @@ export const VideoProvider = ({ children }) => {
     
     // Auto save hook on video context enables auto saving on route changes and refreshes
     useAutoSave(
-        videoId,
-        persons,
-        boundingBoxes,
-        tasks,
-    )
+    videoId,
+    persons,
+    boundingBoxes,
+    tasks,
+    {
+        onReset: () => {
+        setPersons([]);
+        setBoundingBoxes([]);
+        setTasks({});
+        },
+    }
+    );
 
     // useEffect for getting video information if video id is updated
     useEffect(() => {
@@ -91,6 +98,7 @@ export const VideoProvider = ({ children }) => {
         setVideoReady(false);
         setBoxesReady(false);
         setTasksReady(false);
+        setTaskTypeData({});
 
         prepareVideoData(videoId);
 

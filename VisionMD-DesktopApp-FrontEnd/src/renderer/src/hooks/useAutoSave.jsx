@@ -12,71 +12,122 @@ export function useAutoSave(
   persons,
   boundingBoxes,
   tasks,
-  taskBoxes
+  taskBoxes,
+  opts,
 ) {
+  const { onReset } = opts ?? {};
   const location = useLocation();
-  const lastSavedRef = useRef({});
-  const latestSlicesRef = useRef({});
 
-  // Keep the latest props in a ref
+  const lastSavedRef = useRef({});
+  const latestSlicesRef = useRef({ persons, boundingBoxes, taskBoxes, tasks });
+  const prevVideoIdRef = useRef(null);
+
   useEffect(() => {
     latestSlicesRef.current = { persons, boundingBoxes, taskBoxes, tasks };
   }, [persons, boundingBoxes, taskBoxes, tasks]);
 
-  // Reset cache when video changes
-  useEffect(() => {
-    lastSavedRef.current = {};
-  }, [videoId]);
+  const hasContent = (value) =>
+    Array.isArray(value) ? value.length > 0 : !!(value && Object.keys(value).length > 0);
 
-  // Save one slice if it changed
-  const saveSlice = useCallback(async (key, value) => {
-    if (!videoId) return;
-    const previous = lastSavedRef.current[key];
-    if (isEqual(value, previous)) return;
+  const saveSlice = useCallback(
+    async (key, value, idOverride, force = false) => {
+      const resolvedId = (idOverride ?? videoId ?? prevVideoIdRef.current) || null;
+      if (!resolvedId) return;
 
-    // Store a deep clone to avoid future mutations
-    lastSavedRef.current[key] = cloneDeep(value);
+      if (!force) {
+        const previous = lastSavedRef.current[key];
+        if (isEqual(value, previous)) return;
+      }
 
-    console.log(`[AutoSave] Saving "${key}"… \n`, value );
-    try {
-      await fetch(
-        `${API_URL}/update_video_data/?id=${videoId}&file_name=${key}.json`,
-        {
+      lastSavedRef.current[key] = cloneDeep(value);
+
+      const url = `${API_URL}/update_video_data/?id=${resolvedId}&file_name=${encodeURIComponent(key)}.json`;
+
+      try {
+        console.log(`[AutoSave] Saving "${key}" to ${resolvedId}\n`, value);
+        await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(value),
-        }
-      );
-    } catch (err) {
-      console.error(`[AutoSave] Error saving ${key}:`, err);
-    }
-  }, [videoId]);
+        });
+      } catch (err) {
+        console.error(`[AutoSave] Error saving ${key}:`, err);
+      }
+    },
+    [videoId]
+  );
 
-  // Flush all non-empty slices
+  const flushWithId = useCallback(
+    async (id, force = false) => {
+      const { persons, boundingBoxes, taskBoxes, tasks } = latestSlicesRef.current;
+      const slices = { persons, boundingBoxes, taskBoxes, tasks };
+
+      const work = [];
+      Object.entries(slices).forEach(([key, value]) => {
+        if (hasContent(value)) work.push(saveSlice(key, value, id ?? null, force));
+      });
+      await Promise.all(work);
+    },
+    [saveSlice]
+  );
+
   const flush = useCallback(() => {
-    const { persons, boundingBoxes, taskBoxes, tasks } = latestSlicesRef.current;
-    const slices = { persons, boundingBoxes, taskBoxes, tasks };
-
-    Object.entries(slices).forEach(([key, value]) => {
-      const hasContent =
-        Array.isArray(value)
-          ? value.length > 0
-          : value && Object.keys(value).length > 0;
-      if (hasContent) saveSlice(key, value);
-    });
-  }, [saveSlice]);
+    return flushWithId(videoId ?? prevVideoIdRef.current ?? null);
+  }, [flushWithId, videoId]);
 
   const debouncedFlush = useDebouncedCallback(flush, DEBOUNCE_MS);
 
-  // Flush on route change
+  useEffect(() => {
+    if (videoId) {
+      prevVideoIdRef.current = videoId;
+      lastSavedRef.current = {};
+      return;
+    }
+
+    if (videoId === null && prevVideoIdRef.current) {
+      (async () => {
+        try {
+          await flushWithId(prevVideoIdRef.current, true);
+        } finally {
+          lastSavedRef.current = {};
+          onReset?.();
+        }
+      })();
+    }
+  }, [videoId, flushWithId, onReset]);
+
   useEffect(() => {
     debouncedFlush();
     return debouncedFlush.cancel;
   }, [location.pathname, debouncedFlush]);
 
-  // Flush before the window unloads
   useEffect(() => {
-    window.addEventListener("beforeunload", flush);
-    return () => window.removeEventListener("beforeunload", flush);
-  }, [flush]);
+    const handleBeforeUnload = () => {
+      const id = videoId ?? prevVideoIdRef.current;
+      if (!id) return;
+
+      const { persons, boundingBoxes, taskBoxes, tasks } = latestSlicesRef.current;
+      const slices = { persons, boundingBoxes, taskBoxes, tasks };
+
+      Object.entries(slices).forEach(([key, value]) => {
+        if (!hasContent(value)) return;
+
+        const url = `${API_URL}/update_video_data/?id=${id}&file_name=${encodeURIComponent(key)}.json`;
+        try {
+          if (navigator.sendBeacon) {
+            const blob = new Blob([JSON.stringify(value)], { type: "application/json" });
+            navigator.sendBeacon(url, blob);
+          } else {
+            const xhr = new XMLHttpRequest();
+            xhr.open("POST", url, false);
+            xhr.setRequestHeader("Content-Type", "application/json");
+            try { xhr.send(JSON.stringify(value)); } catch (_) {}
+          }
+        } catch (_) {}
+      });
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [videoId]);
 }

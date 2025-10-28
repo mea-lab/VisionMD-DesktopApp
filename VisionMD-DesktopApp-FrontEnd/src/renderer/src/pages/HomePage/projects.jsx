@@ -71,6 +71,7 @@ const renameVideo = async (id, videoName, fileType, setVideos) => {
     throw new Error('Updating video name failed');
   }
 
+  const updatedTimestamp = new Date().toISOString();
   setVideos(vs =>
     vs.map(v => {
       if (v.metadata.id !== id) {
@@ -83,7 +84,8 @@ const renameVideo = async (id, videoName, fileType, setVideos) => {
           ...v.metadata,
           stem_name: videoName,
           video_name: `${videoName}.${v.metadata.file_type}`,
-          video_url: `/media/video_uploads/${id}/${videoName}.${v.metadata.file_type}`
+          video_url: `/media/video_uploads/${id}/${videoName}.${v.metadata.file_type}`,
+          last_edited: updatedTimestamp,
         }
       };
     })
@@ -159,7 +161,7 @@ const VideoTile = ({ video, setVideos }) => {
       
       <img
         src={`${BASE_URL}${video.metadata.thumbnail_url}?t=${video.metadata.last_edited}`}
-        className="rounded-lg w-full aspect-video object-contain cursor-pointer"
+        className="rounded-lg w-full aspect-video object-contain cursor-pointer bg-zinc-900"
         alt={`Thumbnail for ${video.metadata.video_name}`}
         onClick={() => openVideoProject()}
       />
@@ -222,6 +224,12 @@ export default function Projects() {
     fetchedProjects.current = true
   }, []);
 
+  useEffect(() => {
+    if (videos && videos.length > 0) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [videos]);
+
   const handleAddClick = () => fileInputRef.current.click();
 
   const handleFiles = async e => {
@@ -240,7 +248,6 @@ export default function Projects() {
       e.target.value = null; 
     }
   };
-
   return (
     <div>
       {loading && !videos && (
