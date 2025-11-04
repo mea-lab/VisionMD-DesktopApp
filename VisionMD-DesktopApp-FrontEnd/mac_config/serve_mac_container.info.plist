@@ -1,7 +1,7 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key><string>com.mealab.visionmd.backend</string>
-  <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>CFBundleSupportedPlatforms</key><array><string>MacOSX</string></array>
 </dict>
 </plist>

@@ -31,11 +31,17 @@ linux:
 
 mac:
   target:
-    - mas
-    - mas-dev
+    - zip
+    - pkg
   category: public.app-category.utilities
   icon: resources/icon.icns
   minimumSystemVersion: "14.0"
+  forceCodeSigning: true
+  type: "distribution"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: mac_config/entitlements.mac.plist
+  entitlementsInherit: mac_config/entitlements.mac.inherit.plist
   binaries:
     - Contents/backend/serve_mac/serve_mac_container
     - Contents/backend/serve_mac/serve_mac
@@ -46,21 +52,18 @@ mac:
         - "**/*"
   extendInfo:
     ElectronTeamID: 462DH725NR
-
-pkg:
-  installLocation: "/Applications"
+afterSign: mac_config/notarize.js
 
 mas:
   type: distribution
   appId: com.mealab.visionmd
-  entitlements: mac_config/entitlements.mac.plist
-  entitlementsInherit: mac_config/entitlements.mac.inherit.plist
+  entitlements: mac_config/entitlements.mas.plist
+  entitlementsInherit: mac_config/entitlements.mas.inherit.plist
   provisioningProfile: mac_config/embedded.provisionprofile
 
 masDev:
-  identity: "6CCF42A0A5EF045EAA30650FB790798015C04A9A"
   type: development
   appId: com.mealab.visionmd
-  entitlements: mac_config/entitlements.mac.plist
-  entitlementsInherit: mac_config/entitlements.mac.inherit.plist
+  entitlements: mac_config/entitlements.mas.plist
+  entitlementsInherit: mac_config/entitlements.mas.inherit.plist
   provisioningProfile: mac_config/embedded_dev.provisionprofile
