@@ -423,18 +423,21 @@ const Gait = ({
                 </div>
 
                 <div className="flex items-center space-x-1">
-                  <label className="inline text-gray-100 whitespace-nowrap">Height (cm):</label>
+                  <label className="inline text-gray-100 whitespace-nowrap">
+                    Height (cm):
+                  </label>
+
                   <input
                     className="p-1 pl-2 py-1.5 w-20 text-left text-gray-100 border border-zinc-500 rounded-lg bg-transparent"
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
+                    type="number"
+                    inputMode="decimal"
+                    step="any"
                     onChange={(e) => {
-                      const v = e.target.value === '' ? null : +e.target.value;
+                      const v = e.target.value === '' ? null : parseFloat(e.target.value);
                       setTaskGlobals({ height: v });
                       onFieldChange(v, 'height', task);
                     }}
-                    value={h || ''}
+                    value={h ?? ''}
                   />
                 </div>
               </div>
