@@ -1,5 +1,6 @@
 //src/pages/TaskSelection/TaskList.jsx
 import { useState } from 'react';
+import isEqual from 'lodash/isEqual';
 import { taskOptions } from '../../constants/taskOptions'; 
 import Default from './Tasks/default'
 
@@ -34,6 +35,9 @@ const TaskList = ({
       fieldName === 'start' || fieldName === 'end'
         ? Number(Number(newValue).toFixed(3))
         : newValue;
+    if (isEqual(task?.[fieldName], value)) {
+      return;
+    }
     onTaskChange({ id: task.id, [fieldName]: value, data: null });
   };
 

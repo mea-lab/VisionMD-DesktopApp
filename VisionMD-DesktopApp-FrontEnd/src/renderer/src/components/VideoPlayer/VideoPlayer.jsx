@@ -273,6 +273,7 @@ const VideoPlayer = ({
               {boundingBoxes && (
                 <InteractiveOverlays
                   tasks={tasks}
+                  persons={persons}
                   setTasks={setTasks}
                   fileName={fileName}
                   currentFrame={currentFrame}

@@ -54,6 +54,7 @@ const ResizeHandles = ({ x, y, width, height, onResize, item, index, handleSize 
 
 const InteractiveOverlays = ({
   tasks,
+  persons = [],
   setTasks,
   fileName,
   zoomLevel,
@@ -311,6 +312,7 @@ const InteractiveOverlays = ({
       taskToRender = tasks[selectedTask];
     }
   }
+  const personIdx = persons.findIndex((p) => p.isSubject);
 
   const strokeThickness = 5 / Math.min(
     displayWidth  / videoWidth,
@@ -349,17 +351,19 @@ const InteractiveOverlays = ({
             onPointerDown={(!isPlaying && screen === 'tasks') ? (e) => handleTaskDragStart(e, taskToRender, taskIndex) : undefined}
             style={{ cursor: (!isPlaying && screen === 'tasks') ? 'move' : 'default' }}
           />
-          <text
-            x={taskToRender.x + strokeThickness * 0.5}
-            y={taskToRender.y + strokeThickness * 0.5}
-            fontSize={4 * strokeThickness}
-            fontWeight="700"
-            textAnchor="start"
-            dominantBaseline="hanging"
-            fill="yellow"
-          >
-            {taskIndex + 1}
-          </text>
+          {personIdx !== -1 && (
+            <text
+              x={taskToRender.x + strokeThickness * 0.5}
+              y={taskToRender.y + strokeThickness * 0.5}
+              fontSize={4 * strokeThickness}
+              fontWeight="700"
+              textAnchor="start"
+              dominantBaseline="hanging"
+              fill="yellow"
+            >
+              {personIdx + 1}
+            </text>
+          )}
           {(!isPlaying && screen === 'tasks') && (
             <ResizeHandles
               x={taskToRender.x}
