@@ -1,0 +1,69 @@
+# electron-builder.yml
+appId: com.mealab.visionmd
+productName: VisionMD
+
+files:
+  - out/**
+  - "!**/*.map"
+
+win:
+  target: nsis
+  icon: resources/icon.ico
+  extraResources:
+    - from: pyinstaller_builds/serve_windows
+      to: serve_windows
+      filter:
+        - "**/*"
+
+linux:
+  target:
+    - AppImage
+    - snap
+    - deb
+  extraResources:
+    - from: pyinstaller_builds/serve_linux
+      to: serve_linux
+      filter:
+        - "**/*"
+  maintainer: electronjs.org
+  category: Utility
+  icon: resources/icon.png
+
+mac:
+  target:
+    - zip
+    - pkg
+  category: public.app-category.utilities
+  icon: resources/icon.icns
+  minimumSystemVersion: "14.0"
+  forceCodeSigning: true
+  type: "distribution"
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: mac_config/entitlements.mac.plist
+  entitlementsInherit: mac_config/entitlements.mac.inherit.plist
+  binaries:
+    - Contents/backend/serve_mac/serve_mac_container
+    - Contents/backend/serve_mac/serve_mac
+  extraFiles:
+    - from: pyinstaller_builds/serve_mac
+      to: backend/serve_mac
+      filter:
+        - "**/*"
+  extendInfo:
+    ElectronTeamID: 462DH725NR
+afterSign: mac_config/notarize.js
+
+mas:
+  type: distribution
+  appId: com.mealab.visionmd
+  entitlements: mac_config/entitlements.mas.plist
+  entitlementsInherit: mac_config/entitlements.mas.inherit.plist
+  provisioningProfile: mac_config/embedded.provisionprofile
+
+masDev:
+  type: development
+  appId: com.mealab.visionmd
+  entitlements: mac_config/entitlements.mas.plist
+  entitlementsInherit: mac_config/entitlements.mas.inherit.plist
+  provisioningProfile: mac_config/embedded_dev.provisionprofile
