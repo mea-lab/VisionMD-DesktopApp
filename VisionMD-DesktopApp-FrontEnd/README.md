@@ -1,6 +1,26 @@
-# VisionMD Electron
-This repository holds the source code for the frontend and the full releases of VisionMD Electron. Below is the documentation for developing, building and deploying the VisionMD Desktop app.
+# VisionMD Desktop App Front End
+This directory holds the source code for the frontend of the VisionMD desktop app and for deploying the full application installers. Below is the documentation for developing, building and deploying the VisionMD Desktop app.
 
+## Frontend Overview
+
+The frontend is an Electron app with a React renderer. It provides:
+
+- project and video management
+- task selection and subject resolution workflows
+- video playback with overlays and interactive controls
+- task detail pages with plots, tables, and editable waveforms
+- packaged desktop installers through Electron Builder
+
+Important paths:
+
+```text
+VisionMD-DesktopApp-FrontEnd/src/main/index.js
+VisionMD-DesktopApp-FrontEnd/src/preload/index.js
+VisionMD-DesktopApp-FrontEnd/src/renderer/src/App.jsx
+VisionMD-DesktopApp-FrontEnd/src/renderer/src/pages/
+VisionMD-DesktopApp-FrontEnd/src/renderer/src/components/
+VisionMD-DesktopApp-FrontEnd/electron-builder.yml
+```
 
 ## Development
 Follow the below steps to get the app running for development.
@@ -12,7 +32,7 @@ npm install
 This will install all the required node modules from the `package.json` file.
 
 ### 2. Run the backend server
-The backend server is a Django server that can be found at https://github.com/mea-lab/VisionMD-DesktopApp-BackEnd. Follow the instructions from the above repository and run it for development and testing. You must have the backend Django server running on `127.0.0.1:8000`.
+The backend server is a Django server that can be found at `\VisionMD-DesktopApp-BackEnd`. Follow the instructions from the README in that directory and run it for development and testing. You must have the backend Django server running on `127.0.0.1:8000`.
 
 ### 3. Run the frontend server
 ```bash
@@ -22,16 +42,16 @@ This starts the app by default on the port `5173`. It will automatically open up
 
 
 ## Building for Production
-Below details the steps for building the installers and packages needed for Linux, MacOS, and Windows. This assumes you already have correctly built and transfer the pyinstaller executable for the Django server according to your OS. If not, follow the instructions for building the pyinstaller executable at https://github.com/mea-lab/VisionMD-DesktopApp-BackEnd.
+Below details the steps for building the installers and packages needed for Linux, MacOS, and Windows. This assumes you already have correctly built and transfer the pyinstaller executable for the Django server according to your OS. If not, follow the instructions for building the pyinstaller executable at `.\VisionMD-DesktopApp-FrontEnd\README.md.`
 
 ### Building static web assets for internal testing
-This section documents building the static web assets for internal testing on the backend repository of https://github.com/mea-lab/VisionMD-DesktopApp-BackEnd. This option allows for faster builds and testing to get quick feedback. 
+This section documents building the static web assets for internal testing on the backend directory of `.\VisionMD-DesktopApp-FrontEnd` This option allows for faster builds and testing to get quick feedback. 
 
 ```bash
 npm run build
 ```
 
-This will build static web assets at `./out/renderer`. Transfer the `renderer` directory to the root of the https://github.com/mea-lab/VisionMD-DesktopApp-BackEnd repository. Rename it to `dist`. Follow the README in the backend repository to set up the backend server and test your static web assets.
+This will build static web assets at `./out/renderer`. Transfer the `renderer` directory to the `\VisionMD-DesktopApp-FrontEnd.` directory. Rename it to `dist`. Follow the README in the backend directory to set up the backend server and test your static web assets.
 
 ### Windows
 ```bash
