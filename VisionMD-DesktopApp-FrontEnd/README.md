@@ -1,6 +1,26 @@
-# VisionMD Electron
-This repository holds the source code for the frontend and the full releases of VisionMD Electron. Below is the documentation for developing, building and deploying the VisionMD Desktop app.
+# VisionMD Desktop App Front End
+This directory holds the source code for the frontend of the VisionMD desktop app and for deploying the full application installers. Below is the documentation for developing, building and deploying the VisionMD Desktop app.
 
+## Frontend Overview
+
+The frontend is an Electron app with a React renderer. It provides:
+
+- project and video management
+- task selection and subject resolution workflows
+- video playback with overlays and interactive controls
+- task detail pages with plots, tables, and editable waveforms
+- packaged desktop installers through Electron Builder
+
+Important paths:
+
+```text
+VisionMD-DesktopApp-FrontEnd/src/main/index.js
+VisionMD-DesktopApp-FrontEnd/src/preload/index.js
+VisionMD-DesktopApp-FrontEnd/src/renderer/src/App.jsx
+VisionMD-DesktopApp-FrontEnd/src/renderer/src/pages/
+VisionMD-DesktopApp-FrontEnd/src/renderer/src/components/
+VisionMD-DesktopApp-FrontEnd/electron-builder.yml
+```
 
 ## Development
 Follow the below steps to get the app running for development.

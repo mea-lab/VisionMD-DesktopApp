@@ -1,6 +1,32 @@
-# VisionMD BackEnd
+# VisionMD Desktop App Back End
 
 This repository holds the source code for the backend of the VisionMD Desktop App. Below is documentation for developing, building and testing the backend server of VisionMD.
+
+## Backend Overview
+
+The backend is a Django app with these main responsibilities:
+
+- serve API routes under `/api/`
+- upload, stream, update, and delete video data
+- compute bounding boxes and landmarks
+- run task-specific movement analyses
+- serve built frontend static assets for browser testing
+
+Important paths:
+
+```text
+VisionMD-DesktopApp-BackEnd/app/urls.py
+VisionMD-DesktopApp-BackEnd/app/views/
+VisionMD-DesktopApp-BackEnd/app/analysis/
+VisionMD-DesktopApp-BackEnd/app/analysis/tasks/
+VisionMD-DesktopApp-BackEnd/app/analysis/detectors/
+VisionMD-DesktopApp-BackEnd/app/analysis/signal_analyzers/
+VisionMD-DesktopApp-BackEnd/app/analysis/models/
+```
+
+Task files in `app/analysis/tasks/` are discovered dynamically. Adding a new task file following the existing `BaseTask` pattern creates a matching API endpoint.
+
+Current task implementations include finger tapping, hand movement, hand tremor, leg agility, toe tapping, and gait analysis.
 
 ## Prerequisites
 - Anaconda (or Miniconda)  

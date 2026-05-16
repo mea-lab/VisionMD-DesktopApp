@@ -1,0 +1,40 @@
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.env
+.env.*
+!.env.example
+
+# Node/Electron
+node_modules/
+dist/
+out/
+build/
+*.log
+
+# Packaging/build artifacts
+**/dist/
+**/build/
+**/pyinstaller_builds/*
+!**/pyinstaller_builds/README.md
+
+# Large/local model artifacts
+models/
+*.pt
+*.pth
+*.onnx
+*.mp4
+*.mov
+*.avi
+
+# Custom
+Videos
+.codex
