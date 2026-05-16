@@ -54,6 +54,12 @@ class ToeTappingRightTask(BaseTask):
     }
 
     def __init__(self):
+        """Initialize the instance.
+
+        Sets up the task with default configuration and prepares
+        the analysis pipeline.
+        """
+
         self.video_id = None
         self.video_fps = None
         self.video_rotation = None
@@ -72,6 +78,12 @@ class ToeTappingRightTask(BaseTask):
         self.subject_bounding_boxes = None
 
     def api_response(self, request):
+        """Format the analysis results into an API response dictionary.
+
+        Returns:
+            dict: The formatted response suitable for the frontend API.
+        """
+
         try:
             # 1) Process video and define all abstract class parameters
             self.prepare_video_parameters(request)
@@ -180,9 +192,21 @@ class ToeTappingRightTask(BaseTask):
         self.enlarged_bounding_box = enlarged_bounding_box
 
     def get_detector(self):
+        """Return the configured detector instance for this task.
+
+        Returns:
+            BaseDetector: The detector configured for processing video frames.
+        """
+
         return PoseHeavyDetector().get_detector()
 
     def get_signal_analyzer(self):
+        """Return the signal analyzer instance for this task.
+
+        Returns:
+            BaseSignalAnalyzer: The analyzer used to process extracted motion signals.
+        """
+
         return PeakfinderSignalAnalyzer()
 
     def extract_landmarks(self) -> tuple:

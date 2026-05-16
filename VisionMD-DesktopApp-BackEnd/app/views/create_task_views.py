@@ -17,6 +17,12 @@ def _create_view_for_task(file_name: str):
     
     @api_view(['POST'])
     def task_view(request):
+        """Handle task-related API view operations.
+
+        Returns:
+            Response: API response with task data.
+        """
+
         module_name = f"app.analysis.tasks.{file_name}"
         task_module = importlib.import_module(module_name)
 

@@ -8,6 +8,12 @@ from tensorflow.keras import layers
 
 
 def mlp(x, hidden_units, dropout_rate, activation=tf.nn.gelu):
+    """Create a multi-layer perceptron block.
+
+    Returns:
+        tf.keras.Model: The MLP model.
+    """
+
     for units in hidden_units:
         x = layers.Dense(units, activation=activation)(x)
         x = layers.Dropout(dropout_rate)(x)
@@ -15,10 +21,27 @@ def mlp(x, hidden_units, dropout_rate, activation=tf.nn.gelu):
 
 
 class LayerScale(layers.Layer):
+    """Layer scaling module for transformer architecture.
+
+    Applies learnable per-channel scaling to the output of a transformer layer.
+    """
+
     def __init__(self, **kwargs):
+        """Initialize the instance.
+
+        Sets up the task with default configuration and prepares
+        the analysis pipeline.
+        """
+
         super(LayerScale, self).__init__(**kwargs)
 
     def build(self, input_shape):
+        """Build the Keras layer.
+
+        Args:
+            input_shape: Shape of the input tensor.
+        """
+
         # lazy build with the projection dimension
         self.scale = self.add_weight(
             shape=(1, 1, input_shape[-1]),
@@ -27,18 +50,44 @@ class LayerScale(layers.Layer):
         )
 
     def call(self, input, **kwargs):
+        """Forward pass through the layer.
+
+        Args:
+            inputs: Input tensor.
+
+        Returns:
+            tf.Tensor: Output tensor.
+        """
+
         return input * self.scale
 
 
 class FeedForward(keras.Sequential):
+    """Feed-forward network block for transformer layers.
+
+    Implements a two-layer MLP with GELU activation as used in transformer encoders.
+    """
+
 
     def __init__(self, hidden_units, dropout_rate=0.0, activation=tf.nn.gelu, **kwargs):
+        """Initialize the instance.
+
+        Sets up the task with default configuration and prepares
+        the analysis pipeline.
+        """
+
         super(FeedForward, self).__init__(**kwargs)
         self.hidden_units = hidden_units
         self.dropout_rate = dropout_rate
         self.activation = activation
 
     def build(self, input_shape):
+        """Build the Keras layer.
+
+        Args:
+            input_shape: Shape of the input tensor.
+        """
+
         projection_dim = input_shape[-1]
 
         self.add(layers.Dense(self.hidden_units, activation=self.activation))
@@ -53,6 +102,12 @@ class FeedForward(keras.Sequential):
 
 
 class EncoderTransformerLayer(layers.Layer):
+    """Single encoder transformer layer.
+
+    Combines multi-head self-attention with feed-forward processing,
+    layer normalization, and residual connections.
+    """
+
     def __init__(
         self,
         embed_dim,
@@ -97,6 +152,15 @@ class EncoderTransformerLayer(layers.Layer):
             self.stochastic_depth1 = self.stochastic_depth2 = layers.Add()
 
     def call(self, value, positional_encoding=None, training=None):
+        """Forward pass through the layer.
+
+        Args:
+            inputs: Input tensor.
+
+        Returns:
+            tf.Tensor: Output tensor.
+        """
+
 
         if positional_encoding is None:
             query = key = value
@@ -112,6 +176,12 @@ class EncoderTransformerLayer(layers.Layer):
         return self.layernorm2(self.stochastic_depth2([out1, ffn_output], training=training))
 
     def get_config(self):
+        """Return the layer configuration for serialization.
+
+        Returns:
+            dict: Layer configuration dictionary.
+        """
+
         config = super().get_config().copy()
         config.update(
             {
@@ -129,6 +199,12 @@ class EncoderTransformerLayer(layers.Layer):
 
 
 def get_pos_encoding(positions, depth, min_rate=1.0 / 10000.0, dtype=None, pos_divider=None):
+    """Generate positional encoding for transformer input.
+
+    Returns:
+        numpy.ndarray: Positional encoding matrix.
+    """
+
     positions = tf.cast(positions, dtype=dtype)
     if pos_divider is not None:
         positions = positions / pos_divider
@@ -142,6 +218,12 @@ def get_pos_encoding(positions, depth, min_rate=1.0 / 10000.0, dtype=None, pos_d
 
 
 def get_pos_encoding_matrix(num_positions, depth, min_rate=1.0 / 10000.0, dtype=tf.float32, pos_divider=None):
+    """Build the full positional encoding matrix.
+
+    Returns:
+        numpy.ndarray: The encoding matrix.
+    """
+
     positions = tf.range(num_positions)
     return get_pos_encoding(positions, depth, min_rate, dtype, pos_divider)
 
@@ -151,12 +233,33 @@ def get_pos_encoding_matrix(num_positions, depth, min_rate=1.0 / 10000.0, dtype=
 
 
 class PositionalEncodingLayer(layers.Layer):
+    """Positional encoding layer for transformer input.
+
+    Adds sinusoidal positional information to the input embeddings
+    to encode sequence position.
+    """
+
     def __init__(self, min_rate=1.0 / 10000.0, pos_divider=None, **kwargs):
+        """Initialize the instance.
+
+        Sets up the task with default configuration and prepares
+        the analysis pipeline.
+        """
+
         super(PositionalEncodingLayer, self).__init__(**kwargs)
         self.min_rate = min_rate
         self.pos_divider = pos_divider
 
     def call(self, inputs):
+        """Forward pass through the layer.
+
+        Args:
+            inputs: Input tensor.
+
+        Returns:
+            tf.Tensor: Output tensor.
+        """
+
         positions = inputs.shape[1]
         positions = tf.range(positions)
 
@@ -164,6 +267,15 @@ class PositionalEncodingLayer(layers.Layer):
         return tf.expand_dims(get_pos_encoding(positions, depth, self.min_rate, dtype=inputs.dtype, pos_divider=self.pos_divider), axis=0)
 
     def compute_output_shape(self, input_shape):
+        """Compute the output shape given the input shape.
+
+        Args:
+            input_shape: Shape of the input tensor.
+
+        Returns:
+            tuple: Shape of the output tensor.
+        """
+
         return input_shape
 
 
@@ -182,6 +294,12 @@ def get_gait_phase_transformer(
     mlp_head_units=[256, 256],  # Size of the dense layers of the final classifier
     pos_divider=None,
 ):
+    """Build and return the gait phase transformer model.
+
+    Returns:
+        tf.keras.Model: The configured transformer model.
+    """
+
 
     input_shape = dataset.element_spec[0].shape
     T = input_shape[1]  # sequence length
@@ -251,6 +369,12 @@ def get_gait_phase_stride_transformer(
     mlp_head_units=[256, 256],  # Size of the dense layers of the final classifier
     pos_divider=None,
 ):
+    """Build the gait phase stride transformer model.
+
+    Returns:
+        tf.keras.Model: The stride-level transformer model.
+    """
+
 
     if dataset is None:
         dataset_sig = (
@@ -383,8 +507,22 @@ def get_gait_phase_stride_transformer(
     if physics_consistency_loss > 0:
 
         class LossLayer(layers.Layer):
+            """Custom loss computation layer for the gait transformer model.
+
+            Computes the training loss for gait phase predictions.
+            """
+
 
             def call(self, x):
+                """Forward pass through the layer.
+
+                Args:
+                    inputs: Input tensor.
+
+                Returns:
+                    tf.Tensor: Output tensor.
+                """
+
 
                 dt = 1 / 30.0
                 discrete_velocity = (x[:, 1:, 8:10, :] - x[:, :-1, 8:10, :]) / dt
@@ -417,6 +555,12 @@ def get_gait_phase_stride_transformer(
 
 
 def shift_generator(keypoints3d, stride=1, L=90):
+    """Generate shifted versions of the input sequence.
+
+    Yields:
+        numpy.ndarray: Shifted sequence windows.
+    """
+
     N = keypoints3d.shape[0]
     length_idx = np.arange(L)
     samples = np.arange(0, N - L + 1, stride)
@@ -425,6 +569,12 @@ def shift_generator(keypoints3d, stride=1, L=90):
 
 
 def chunk_generator(keypoints3d, stride=1, L=90, batch_size=32):
+    """Generate chunks of data for batched processing.
+
+    Yields:
+        numpy.ndarray: Data chunks.
+    """
+
     shift_sample_iter = shift_generator(keypoints3d, stride=stride, L=L)
 
     while True:
@@ -441,6 +591,12 @@ def chunk_generator(keypoints3d, stride=1, L=90, batch_size=32):
 
 
 def gait_phase_stride_inference(keypoints3d, height, regressor, L, batch_size=128):
+    """Run inference for gait phase stride detection.
+
+    Returns:
+        dict: Inference results with phase predictions.
+    """
+
 
     from tqdm import tqdm
 

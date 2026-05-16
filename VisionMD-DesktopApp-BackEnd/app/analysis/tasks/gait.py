@@ -24,6 +24,12 @@ from app.analysis.models.gait_transformer.gait_phase_kalman import gait_kalman_s
 
 
 class GaitTask(BaseTask):
+    """Analysis task for gait assessment.
+
+    Processes video to analyze walking patterns, stride length, cadence,
+    and other gait parameters for clinical evaluation.
+    """
+
 
     # ------------------------------------------------------------------
     # --- START: Abstract properties definitions
@@ -54,6 +60,12 @@ class GaitTask(BaseTask):
     # --- START: Abstract methods definitions
     # -------------------------------------------------------------
     def __init__(self):
+            """Initialize the instance.
+
+            Sets up the task with default configuration and prepares
+            the analysis pipeline.
+            """
+
             self.video_id = None
             self.file_path = None
             self.ile_name = None
@@ -615,6 +627,12 @@ class GaitTask(BaseTask):
     # -------------------------------------------------------------
     # ----- Function for calculating the averages features of original and mirrored videos
     def calculate_average_features(self, original_features, mirrored_features):
+        """Calculate average features across all gait cycles.
+
+        Returns:
+            dict: Averaged gait feature metrics.
+        """
+
         average = {
             "Average stance time": (original_features["Average stance time"] + mirrored_features["Average stance time"]) / 2.0,
             "Average swing time": (original_features["Average swing time"] + mirrored_features["Average swing time"]) / 2.0,
@@ -756,6 +774,12 @@ class GaitTask(BaseTask):
 
     # Video Reader helper function
     def video_reader(self, filepath, batch_size=4, start_frame=0, end_frame=None):
+        """Generator that reads video frames one at a time.
+
+        Yields:
+            numpy.ndarray: Individual video frames.
+        """
+
         if not os.path.isfile(filepath):
             print("Error: File path is not a video")
             return None, None

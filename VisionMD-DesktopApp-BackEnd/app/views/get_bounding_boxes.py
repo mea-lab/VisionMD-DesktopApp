@@ -8,6 +8,15 @@ from hachoir.parser import createParser
 from hachoir.metadata import extractMetadata
 
 def get_rotation(path):
+    """Determine the rotation metadata of a video file.
+
+    Args:
+        filepath: Path to the video file.
+
+    Returns:
+        int: Rotation angle in degrees.
+    """
+
     mi = MediaInfo.parse(path)
     for track in mi.tracks:
         if track.track_type == "Video" and getattr(track, 'rotation', None):
@@ -29,6 +38,12 @@ def get_rotation(path):
 
 @api_view(['GET'])
 def get_bounding_boxes(request):
+    """Retrieve bounding box data for a video analysis.
+
+    Returns:
+        Response: API response with bounding box coordinates.
+    """
+
     from app.analysis.detectors.yolo_detectors import yolo_tracker
 
     # Get all variables set up and check if folder and file paths exist

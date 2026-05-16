@@ -40,6 +40,16 @@ class PeakfinderSignalAnalyzer(BaseSignalAnalyzer):
     """
 
     def analyze(self, raw_signal, normalization_factor, start_time, end_time):
+        """Analyze the motion signal and extract key features.
+
+        Args:
+            signal: Input motion signal.
+            fs: Sampling frequency.
+
+        Returns:
+            dict: Analysis results with peaks, valleys, and metrics.
+        """
+
         # 1) Normalize
         signal_array = np.array(raw_signal, dtype=float)
         norm = normalization_factor if normalization_factor else 1.0
@@ -127,6 +137,12 @@ class PeakfinderSignalAnalyzer(BaseSignalAnalyzer):
 # -------------------- Peak Finder & Helpers --------------------
 # ---------------------------------------------------------------
 def decayEstimation(Peaks, nSelectedPeaks=4):
+    """Estimate the decay rate of the signal envelope.
+
+    Returns:
+        float: Estimated decay coefficient.
+    """
+
     slope, b = np.polyfit(np.arange(len(Peaks)), Peaks, 1)
     if slope < 0:
         return slope
@@ -134,6 +150,12 @@ def decayEstimation(Peaks, nSelectedPeaks=4):
         return 0
 
 def scaling(landmarks, scale='THUMBSIZE'):
+    """Apply scaling normalization to the signal.
+
+    Returns:
+        numpy.ndarray: Scaled signal.
+    """
+
     prevScale = []
     newScale = []
 
@@ -236,6 +258,12 @@ def scaling(landmarks, scale='THUMBSIZE'):
         return scalingFactor, scale  # Return scaling factor and scaling method
 
 def get_output(up_sample_signal):
+    """Compile and return the full analysis output.
+
+    Returns:
+        dict: Complete analysis results dictionary.
+    """
+
     fs = 60
     distance, velocity, peaks, indexPositiveVelocity, indexNegativeVelocity = peakFinder(
         up_sample_signal, fs=fs, minDistance=3, cutOffFrequency=7.5, prct=0.05
@@ -492,6 +520,12 @@ def get_output(up_sample_signal):
 
 
 def compareNeighboursNegative(item1, item2, distance, minDistance=5):
+    """Compare negative peaks with their neighbours.
+
+    Returns:
+        list: Indices of valid negative peaks.
+    """
+
     # case 1 -> item1 peak and item2 valley are too close
     if abs(item1['valleyIndex'] - item2['peakIndex']) < minDistance:
         # remove one of them, keep the one with highest speed
@@ -553,6 +587,12 @@ def compareNeighboursNegative(item1, item2, distance, minDistance=5):
 
 
 def compareNeighboursPositive(item1, item2, distance, minDistance=5):
+    """Compare positive peaks with their neighbours.
+
+    Returns:
+        list: Indices of valid positive peaks.
+    """
+
     # case 1 -> item1 peak and item2 valley are too close
     if abs(item1['peakIndex'] - item2['valleyIndex']) < minDistance:
         # remove one of them, keep the one with highest speed
@@ -614,6 +654,12 @@ def compareNeighboursPositive(item1, item2, distance, minDistance=5):
 
 
 def eliminateBadNeighboursNegative(indexVelocity, distance, minDistance=5):
+    """Eliminate negative peaks with bad neighbouring values.
+
+    Returns:
+        list: Filtered negative peak indices.
+    """
+
     indexVelocityCorrected = []
     isSkip = [False] * len(indexVelocity)
 
@@ -638,6 +684,12 @@ def eliminateBadNeighboursNegative(indexVelocity, distance, minDistance=5):
 
 
 def eliminateBadNeighboursPositive(indexVelocity, distance, minDistance=5):
+    """Eliminate positive peaks with bad neighbouring values.
+
+    Returns:
+        list: Filtered positive peak indices.
+    """
+
     indexVelocityCorrected = []
     isSkip = [False] * len(indexVelocity)
 
@@ -663,6 +715,12 @@ def eliminateBadNeighboursPositive(indexVelocity, distance, minDistance=5):
 
 
 def correctBasedonHeight(pos, distance, prct=0.125, minDistance=5):
+    """Correct peak detection based on peak height thresholds.
+
+    Returns:
+        list: Height-corrected peak indices.
+    """
+
     # eliminate any peaks that is smaller than 15% of the average height
     heightPeaks = []
     for item in pos:
@@ -693,6 +751,12 @@ def correctBasedonHeight(pos, distance, prct=0.125, minDistance=5):
 
 
 def correctBasedonVelocityNegative(pos, velocity, prct=0.125):
+    """Correct negative peaks based on velocity constraints.
+
+    Returns:
+        list: Velocity-corrected negative peak indices.
+    """
+
     # velocity[velocity>0] = 0
     velocity = velocity ** 2
 
@@ -719,6 +783,12 @@ def correctBasedonVelocityNegative(pos, velocity, prct=0.125):
 
 
 def correctBasedonVelocityPositive(pos, velocity, prct=0.125):
+    """Correct positive peaks based on velocity constraints.
+
+    Returns:
+        list: Velocity-corrected positive peak indices.
+    """
+
     velocity[velocity < 0] = 0
     velocity = velocity ** 2
 
@@ -745,6 +815,12 @@ def correctBasedonVelocityPositive(pos, velocity, prct=0.125):
 
 
 def correctFullPeaks(distance, pos, neg):
+    """Apply full peak correction pipeline.
+
+    Returns:
+        dict: Corrected peak and valley data.
+    """
+
     # get the negatives
     closingVelocities = []
     for item in neg:
@@ -812,6 +888,12 @@ def correctFullPeaks(distance, pos, neg):
 
 
 def correctBasedonPeakSymmetry(peaks):
+    """Correct peaks based on symmetry analysis.
+
+    Returns:
+        list: Symmetry-corrected peak indices.
+    """
+
     peaksCorrected = []
     for peak in peaks:
         leftValley = peak['openingValleyIndex']
@@ -826,6 +908,12 @@ def correctBasedonPeakSymmetry(peaks):
 
 
 def peakFinder(rawSignal, fs=30, minDistance=5, cutOffFrequency=5, prct=0.125):
+    """Find peaks and valleys in the signal.
+
+    Returns:
+        dict: Detected peaks and valleys with metadata.
+    """
+
     indexPositiveVelocity = []
     indexNegativeVelocity = []
 

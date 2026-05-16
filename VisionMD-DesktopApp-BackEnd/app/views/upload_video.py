@@ -13,6 +13,12 @@ import os, sys
 import traceback
 
 def get_ffmpeg_path():
+    """Return the path to the ffmpeg binary for the current platform.
+
+    Returns:
+        str: Absolute path to the ffmpeg executable.
+    """
+
     if getattr(sys, 'frozen', False):
         base_path = sys._MEIPASS
         return os.path.join(base_path, "ffmpeg")
@@ -23,6 +29,15 @@ def get_ffmpeg_path():
         return ffmpeg_path
 
 def is_vfr(input_path):
+    """Check whether a video file has variable frame rate.
+
+    Args:
+        input_path: Path to the video file.
+
+    Returns:
+        bool: True if the video has variable frame rate.
+    """
+
     ffmpeg_path = get_ffmpeg_path()
     ffmprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
     print(f"Chosen ffmpeg binary path for ffmprobing video: {ffmprobe_path}")
@@ -50,6 +65,13 @@ def is_vfr(input_path):
         raise RuntimeError("Failed to parse FFprobe VFR check output.")
 
 def convert_to_cfr(input_path, fps):
+    """Convert a variable frame rate video to constant frame rate.
+
+    Args:
+        input_path: Path to the input video.
+        fps: Target constant frame rate.
+    """
+
     print("Running conversion to cfr...")
     if not is_vfr(input_path):
         print("Video is CFR already, skipping conversion.")
@@ -88,6 +110,13 @@ def convert_to_cfr(input_path, fps):
     os.rename(output_path, input_path)
 
 def convert_to_square_pixels(input_path):
+    """Convert video to square pixel format.
+
+    Args:
+        input_path: Path to the input video.
+        output_path: Path for the converted output.
+    """
+
     print("Running conversion to square pixels...")
     ffmpeg_path = get_ffmpeg_path()
     ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
@@ -113,6 +142,15 @@ def convert_to_square_pixels(input_path):
     dar = stream.get("display_aspect_ratio")
 
     def parse_ratio(ratio):
+        """Parse a string ratio into a numeric value.
+
+        Args:
+            ratio_str: String representation of the ratio.
+
+        Returns:
+            float: The parsed ratio value.
+        """
+
         if not ratio or ratio in {"0:1", "N/A"}:
             return None
         try:
@@ -178,6 +216,13 @@ def convert_to_square_pixels(input_path):
     return input_path
 
 def convert_to_h264_aac(input_path):
+    """Transcode video to H.264 video codec with AAC audio.
+
+    Args:
+        input_path: Path to the input video.
+        output_path: Path for the converted output.
+    """
+
     print("Running conversion to h264 aac encoding...")
     ffmpeg_path = get_ffmpeg_path()
     ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
@@ -270,6 +315,13 @@ def convert_to_h264_aac(input_path):
     return input_path
 
 def convert_to_mp4(input_path):
+    """Convert video to MP4 container format.
+
+    Args:
+        input_path: Path to the input video.
+        output_path: Path for the converted output.
+    """
+
     print("Running conversion to mp4...")
 
     ffmpeg_path = get_ffmpeg_path()
@@ -361,6 +413,12 @@ def convert_to_mp4(input_path):
     return saved_video_path
 
 def add_dummy_audio_if_missing(video_path):
+    """Add a silent audio track to video if it lacks audio.
+
+    Args:
+        filepath: Path to the video file.
+    """
+
     ffmpeg_path = get_ffmpeg_path()
     ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
 
@@ -411,6 +469,15 @@ def add_dummy_audio_if_missing(video_path):
     return video_path
 
 def get_rotation(path):
+    """Determine the rotation metadata of a video file.
+
+    Args:
+        filepath: Path to the video file.
+
+    Returns:
+        int: Rotation angle in degrees.
+    """
+
     mi = MediaInfo.parse(path)
     for track in mi.tracks:
         if track.track_type == "Video" and getattr(track, 'rotation', None):
@@ -433,6 +500,12 @@ def get_rotation(path):
 
 @api_view(['POST'])
 def upload_video(request):
+    """Handle video file upload, including format conversion and storage.
+
+    Returns:
+        Response: Flask/DRF response with upload status.
+    """
+
     try:
         print("Started processing video upload...")
         if 'video' not in request.FILES:

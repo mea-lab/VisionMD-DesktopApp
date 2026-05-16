@@ -7,6 +7,12 @@ import shutil
 
 @api_view(['DELETE'])
 def delete_video(request):
+    """Delete a video and its associated analysis data.
+
+    Returns:
+        Response: API response with the deletion status.
+    """
+
 
     video_id = request.GET.get('id')
 

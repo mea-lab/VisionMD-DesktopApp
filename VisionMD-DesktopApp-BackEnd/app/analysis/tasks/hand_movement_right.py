@@ -16,6 +16,12 @@ from app.analysis.detectors.mp_hand_detector import HandDetector
 from app.analysis.signal_analyzers.peakfinder_signal_analyzer import PeakfinderSignalAnalyzer
 
 class HandMovementRightTask(BaseTask):
+    """Analysis task for right hand movement assessment.
+
+    Processes video to extract and analyze right hand movement patterns
+    for clinical evaluation.
+    """
+
 
 # ------------------------------------------------------------------
 # --- START: Abstract properties definitions
@@ -55,6 +61,12 @@ class HandMovementRightTask(BaseTask):
 # --- START: Abstract methods definitions
 # -------------------------------------------------------------
     def __init__(self):
+        """Initialize the instance.
+
+        Sets up the task with default configuration and prepares
+        the analysis pipeline.
+        """
+
         self.video_id = None
         self.video_fps = None
         self.video_rotation = None
@@ -73,6 +85,12 @@ class HandMovementRightTask(BaseTask):
         self.subject_bounding_boxes = None
     
     def api_response(self, request):
+        """Format the analysis results into an API response dictionary.
+
+        Returns:
+            dict: The formatted response suitable for the frontend API.
+        """
+
         try:
             # 1. Define video parameters that were declared in init
             self.prepare_video_parameters(request)
@@ -175,12 +193,33 @@ class HandMovementRightTask(BaseTask):
         self.enlarged_bounding_box = enlarged_bounding_box
 
     def get_detector(self):
+        """Return the configured detector instance for this task.
+
+        Returns:
+            BaseDetector: The detector configured for processing video frames.
+        """
+
         return HandDetector().get_detector()
 
     def get_signal_analyzer(self):
+        """Return the signal analyzer instance for this task.
+
+        Returns:
+            BaseSignalAnalyzer: The analyzer used to process extracted motion signals.
+        """
+
         return PeakfinderSignalAnalyzer()
 
     def extract_landmarks(self) -> tuple:
+        """Extract relevant landmarks from detector output for each frame.
+
+        Args:
+            detector_output: Raw output from the pose/hand detector.
+
+        Returns:
+            list: Extracted landmark coordinates per frame.
+        """
+
         detector = HandDetector().get_detector()
         essential_landmarks = []
         all_landmarks = []
@@ -247,6 +286,15 @@ class HandMovementRightTask(BaseTask):
 
     
     def calculate_signal(self, essential_landmarks):
+        """Calculate the motion signal from extracted landmarks.
+
+        Args:
+            landmarks: List of landmark coordinates per frame.
+
+        Returns:
+            numpy.ndarray: The computed motion signal over time.
+        """
+
         signal = []
         prev_dist = 0
         for frame_lms in essential_landmarks:
@@ -267,10 +315,25 @@ class HandMovementRightTask(BaseTask):
         return signal
 
     def calculate_normalization_factor(self, landmarks) -> float:
+        """Compute the normalization factor for the signal.
+
+        Returns:
+            float: The normalization scaling factor.
+        """
+
         LM = HandMovementRightTask.LANDMARKS
         factors = []
 
         def has_idxs(frame, *idxs):
+            """Check whether the required landmark indices are present.
+
+            Args:
+                frame_landmarks: Landmarks for the current frame.
+
+            Returns:
+                bool: True if all required indices are available.
+            """
+
             return all(i < len(frame) for i in idxs)
 
         for frame in landmarks:

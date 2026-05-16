@@ -7,6 +7,12 @@ from rest_framework.decorators import api_view
 
 @api_view(['GET'])
 def get_stream_media(request, path):
+    """Stream media file content to the client with range support.
+
+    Returns:
+        Response: Streaming response with the media content.
+    """
+
     fullpath = os.path.join(settings.MEDIA_ROOT, path)
     if not os.path.exists(fullpath):
         raise Http404
@@ -43,6 +49,12 @@ def get_stream_media(request, path):
     return resp
 
 def file_iterator(path, offset=0, length=None, chunk_size=8192):
+    """Iterate over file chunks for streaming delivery.
+
+    Yields:
+        bytes: Chunks of file data.
+    """
+
     with open(path, 'rb') as f:
         f.seek(offset)
         remaining = length

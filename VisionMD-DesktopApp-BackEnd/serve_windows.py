@@ -10,6 +10,11 @@ logging.basicConfig(
 )
 
 def main():
+    """Main entry point for the server on this platform.
+
+    Initializes and starts the application server.
+    """
+
     sys.path.append(os.path.dirname(__file__))
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'VideoAnalysisToolBackend.settings')
 

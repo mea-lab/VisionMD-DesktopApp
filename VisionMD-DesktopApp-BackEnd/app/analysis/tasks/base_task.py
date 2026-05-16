@@ -174,6 +174,12 @@ class BaseTask(ABC):
 
     @staticmethod
     def correct_frame_orientation(cv2_frame, rotation):
+        """Correct the frame orientation based on EXIF rotation metadata.
+
+        Returns:
+            numpy.ndarray: Corrected frame.
+        """
+
         rotation_code = {
             90: cv2.ROTATE_90_CLOCKWISE,
             180: cv2.ROTATE_180,
@@ -186,6 +192,12 @@ class BaseTask(ABC):
 
     @staticmethod
     def get_video_width_height(video_file_path, rotation):
+        """Get the width and height of a video file.
+
+        Returns:
+            tuple: (width, height) of the video.
+        """
+
         cap = cv2.VideoCapture(video_file_path)
         ret, first_frame = cap.read()
         if not ret:
