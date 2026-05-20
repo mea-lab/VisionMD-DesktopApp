@@ -85,6 +85,8 @@ class ToeTappingLeftTask(BaseTask):
 
             # Calculate normalization factor based on shoulder-to-hip distance.
             normalization_factor = self.calculate_normalization_factor(essential_landmarks)
+            essential_landmarks = self.interpolate_missing_landmarks(essential_landmarks)
+            all_landmarks = self.interpolate_missing_landmarks(all_landmarks)
 
             # Calculate the raw toe tapping signal.
             raw_signal = self.calculate_signal(essential_landmarks)

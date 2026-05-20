@@ -117,34 +117,15 @@ class HandTremorRightElbowExtendedTask(BaseTask):
             print("Passed pixel conversion", pixel_to_mm_conversion_factor)
 
             landmarks = self.extract_landmarks()
+            landmarks = [
+                lm.tolist() if hasattr(lm, "tolist") else lm
+                for lm in landmarks
+            ]
+            landmarks = self.interpolate_missing_landmarks(landmarks)
+            landmarks_np = np.asarray(landmarks, dtype=np.float32)
             tf.keras.backend.clear_session()
             context().clear_kernel_cache()
             print("Passed landmark extraction")
-
-            sample = None
-            for lm in landmarks:
-                if len(lm) > 0:
-                    sample = np.asarray(lm)
-                    break
-            if sample is None:
-                raise Exception("No valid right hand landmarks found in any frame.")
-            if sample.ndim != 2 or sample.shape[1] < 2:
-                raise Exception("Unexpected landmark shape for right hand.")
-
-            num_frames = len(landmarks)
-            landmarks_np = np.full((num_frames,) + sample.shape, np.nan, dtype=np.float32)
-            for i, lm in enumerate(landmarks):
-                if len(lm) > 0:
-                    landmarks_np[i] = np.asarray(lm, dtype=np.float32)
-
-            valid_idx = np.where(~np.isnan(landmarks_np[:, 0, 0]))[0]
-            if valid_idx.size == 0:
-                raise Exception("No valid right hand landmarks found in any frame.")
-            if valid_idx.size == 1:
-                landmarks_np[:] = landmarks_np[valid_idx[0]]
-            else:
-                f = interp1d(valid_idx, landmarks_np[valid_idx], axis=0, kind="linear", bounds_error=False, fill_value="extrapolate")
-                landmarks_np = f(np.arange(num_frames, dtype=np.float32)).astype(np.float32)
 
             tremorSignal_Vertical_mm, tremorSignal_Horizontal_mm = self.calculate_signal(landmarks_np, pixel_to_mm_conversion_factor)
             print("Passed signal calculation")
