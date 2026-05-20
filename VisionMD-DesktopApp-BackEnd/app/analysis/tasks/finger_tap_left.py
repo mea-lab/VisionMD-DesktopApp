@@ -78,6 +78,8 @@ class FingerTapLeftTask(BaseTask):
 
             # 2. Extract landmarks from video
             essential_landmarks, all_landmarks = self.extract_landmarks()
+            essential_landmarks = self.interpolate_missing_landmarks(essential_landmarks)
+            all_landmarks = self.interpolate_missing_landmarks(all_landmarks)
             
             # 3. Calculate normalization factor from landmarks
             normalization_factor = self.calculate_normalization_factor(all_landmarks)

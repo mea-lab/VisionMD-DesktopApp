@@ -173,6 +173,92 @@ class BaseTask(ABC):
         return coords
 
     @staticmethod
+    def interpolate_missing_landmarks(landmarks):
+        """
+        Linearly interpolates missing landmark frames using np.interp.
+
+        Input format:
+            landmarks[frame_index][landmark_index][coord_index]
+
+        Notes:
+            - Supports either 2D points ([x, y]) or 3D points ([x, y, z]).
+            - Missing frames are expected to be [] or None.
+            - Leading/trailing gaps are filled with the nearest valid value.
+        """
+
+        # Error Checking
+        first_valid_frame = None
+        num_landmarks = None
+        num_coords = None
+        for frame_index, frame in enumerate(landmarks):
+            if frame is None:
+                continue
+            if len(frame) > 0:
+                first_valid_frame = frame
+                num_landmarks = len(first_valid_frame)
+                num_coords = len(first_valid_frame[0])
+                break
+        if first_valid_frame is None:
+            raise ValueError("No valid frame found. Cannot interpolate all-missing landmarks.")
+        if num_landmarks == 0:
+            raise ValueError("First valid frame has no landmarks.")
+        if num_coords not in (2, 3):
+            raise ValueError(f"Landmark coordinate dimension must be 2 or 3, got {num_coords}.")
+        for landmark_index, point in enumerate(first_valid_frame):
+            if not isinstance(point, list):
+                raise TypeError(f"First valid frame landmark {landmark_index} is not a coordinate list.")
+            if len(point) != num_coords:
+                raise ValueError("Inconsistent coordinate dimension in first valid frame.")
+
+        num_frames = len(landmarks)
+        num_frames_missing = 0
+        frame_indices = np.arange(num_frames, dtype=float)
+        interpolated = np.full((num_frames, num_landmarks, num_coords), np.nan, dtype=float)
+
+        for frame_index, frame in enumerate(landmarks):
+            if frame is None or frame == []:
+                num_frames_missing += 1
+                continue
+            if not isinstance(frame, list):
+                raise TypeError(f"Frame {frame_index} must be a list, [] for missing, or None.")
+            if len(frame) != num_landmarks:
+                raise ValueError(f"Frame {frame_index} has {len(frame)} landmarks; expected {num_landmarks}.")
+
+            for landmark_index, point in enumerate(frame):
+                if not isinstance(point, list):
+                    raise TypeError(f"Frame {frame_index}, landmark {landmark_index} is not a coordinate list.")
+                if len(point) != num_coords:
+                    raise ValueError(f"Frame {frame_index}, landmark {landmark_index} has {len(point)} coords, expected {num_coords}.")
+                try:
+                    interpolated[frame_index, landmark_index, :] = np.asarray(point, dtype=float)
+                except Exception as exc:
+                    raise ValueError(f"Non-numeric coordinate at frame {frame_index}, landmark {landmark_index}.") from exc
+
+        for landmark_index in range(num_landmarks):
+            for coord_index in range(num_coords):
+                series = interpolated[:, landmark_index, coord_index]
+                valid_mask = np.isfinite(series)
+                valid_count = int(np.sum(valid_mask))
+
+                if valid_count == 0:
+                    raise ValueError(
+                        f"No valid values for landmark {landmark_index}, coordinate {coord_index}."
+                    )
+
+                valid_x = frame_indices[valid_mask]
+                valid_y = series[valid_mask]
+
+                if valid_count == 1:
+                    series[:] = valid_y[0]
+                else:
+                    series[:] = np.interp(frame_indices, valid_x, valid_y)
+
+                interpolated[:, landmark_index, coord_index] = series
+
+        print(f"Number of missing frames where landmarks were interpolated: {num_frames_missing}")
+        return interpolated.tolist()
+
+    @staticmethod
     def correct_frame_orientation(cv2_frame, rotation):
         rotation_code = {
             90: cv2.ROTATE_90_CLOCKWISE,

@@ -74,8 +74,9 @@ class LegAgilityRightTask(BaseTask):
             signal_analyzer = self.get_signal_analyzer()
 
             # 4) Extract landmarks using the defined detector
-            result = self.extract_landmarks()
-            essential_landmarks, all_landmarks = result
+            essential_landmarks, all_landmarks = self.extract_landmarks()
+            essential_landmarks = self.interpolate_missing_landmarks(essential_landmarks)
+            all_landmarks = self.interpolate_missing_landmarks(all_landmarks)
 
             # 5) Compute normalization factor.
             normalization_factor = self.calculate_normalization_factor(essential_landmarks)

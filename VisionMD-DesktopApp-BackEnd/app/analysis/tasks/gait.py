@@ -85,7 +85,8 @@ class GaitTask(BaseTask):
             # 2) Getting detector and using detector to get landmarks
             with tf.device('/CPU:0'):
                 detector = self.get_detector()
-            landmarks, landmarks_mirrored = self.extract_landmarks(detector)    
+            landmarks, landmarks_mirrored = self.extract_landmarks(detector)
+
             tf.keras.backend.clear_session()
             context().clear_kernel_cache()
 
