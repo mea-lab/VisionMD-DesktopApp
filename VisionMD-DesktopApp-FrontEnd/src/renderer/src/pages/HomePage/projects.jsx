@@ -215,7 +215,7 @@ export default function Projects() {
 
   useEffect(() => {
     if (fetchedProjects.current == false) {
-      fetchVideos(`${BASE_URL}/api/get_video_data/`)
+      fetchVideos(`${BASE_URL}/api/get_video_metadata/`)
         .then(setVideos)
         .catch(console.error)
         .finally(() => setLoading(false));
