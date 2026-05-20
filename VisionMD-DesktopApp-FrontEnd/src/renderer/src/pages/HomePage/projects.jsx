@@ -268,17 +268,17 @@ export default function Projects() {
       <div className="grid gap-8" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))' }}>
         {videos && (
           <>
+            {/* Add project tile */}
+            <div key={"add"} style={{ width: '100%', aspectRatio: '4 / 3' }}>
+              <AddTile className="w-full h-full" onClick={handleAddClick} />
+            </div>
+            
             {/* All video tiles */}
             {videos.map((video) => (
               <div key={video.metadata.id} style={{ width: '100%', aspectRatio: '4 / 3' }}>
                 <VideoTile className="w-full h-full" video={video} setVideos={setVideos}/>
               </div>
             ))}
-
-            {/* Add project tile */}
-            <div key={"add"} style={{ width: '100%', aspectRatio: '4 / 3' }}>
-              <AddTile className="w-full h-full" onClick={handleAddClick} />
-            </div>
           </>
         )}
       </div>
