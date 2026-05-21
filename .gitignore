@@ -38,3 +38,4 @@ models/
 # Custom
 Videos
 .codex
+.agents
