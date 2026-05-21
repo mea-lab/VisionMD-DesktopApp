@@ -4,7 +4,7 @@ VisionMD is a cross-platform desktop application for video-based kinematic analy
 
 This repository splits the application into two main parts:
 
-- `VisionMD-DesktopApp-FrontEnd/` - Manages video review, task selection, visualizations and cross-platform installer builds.
+- `VisionMD-DesktopApp-FrontEnd/` - Manages subject selection, task selection, landmark visualization, signal graphs and cross-platform installer builds.
 - `VisionMD-DesktopApp-BackEnd/` - Manages video data management, landmark detection, task analysis, signal analysis, and PyInstaller builds.
 
 The rest of this document goes over the development, testing and deployment of VisionMD. Depending on your platform, some steps may vary.
