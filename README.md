@@ -22,7 +22,7 @@ The rest of this document goes over the development, testing and deployment of V
 ## Production Setup
 1. Build the backend Pyinstaller executable using the instructions in VisionMD-DesktopApp-BackEnd\README.md.
 2. Transfer the Pyinstaller executable to the frontend.
-3. Build the frontend installers depending on your OS using the instructions in VisionMD-DesktopApp-FrontEnd\README.md.
+3. Build the frontend installers depending on your platform using the instructions in VisionMD-DesktopApp-FrontEnd\README.md.
 
 ## Static Testing Setup
 1. Follow the instructions in VisionMD-DesktopApp-FrontEnd\README.md to build the static web assets.
