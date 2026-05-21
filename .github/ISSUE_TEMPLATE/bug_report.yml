@@ -1,0 +1,26 @@
+name: Bug report
+description: Report something that is not working correctly.
+title: "[Bug]: INSERT BUG REPORT TITLE HERE"
+labels: ["bug"]
+projects: ["VisionMD-DesktopApp"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: |
+        1) Decribe the bug.
+        2) List the exact steps needed to produce the bug.
+        3) Describe what should have happened instead.
+        4) Share your OS, app version, error messages, or other relevant details.
+        5) If the bug is related to a video, upload the video to [MEALab Dropbox Issue Video Folder](https://www.dropbox.com/home/MEALab/VisionMDDesktop/Videos/GitHub%20Issue%20Videos) and rename the video to be the title of your bug. If you do not have access to this folder, email the video to Dr. Diego Guarin and submit this issue.
+      placeholder: "Issue here..."
+    validations:
+      required: true
+  - type: upload
+    id: files
+    attributes:
+      label: File Upload
+      description: Attach any screenshots or videos of the bug.
+    validations:
+      required: False
