@@ -2,7 +2,7 @@ name: Feature request
 description: Suggest a new feature or improvement to the VisionMD Desktop App.
 title: "[Feature]: INSERT FEATURE REQUEST TITLE HERE"
 labels: ["enhancement"]
-projects: ["VisionMD-DesktopApp"]
+projects: ["mea-lab/2"]
 body:
   - type: textarea
     id: description
