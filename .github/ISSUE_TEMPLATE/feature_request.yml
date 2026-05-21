@@ -1,0 +1,23 @@
+name: Feature request
+description: Suggest a new feature or improvement to the VisionMD Desktop App.
+title: "[Feature]: INSERT FEATURE REQUEST TITLE HERE"
+labels: ["enhancement"]
+projects: ["VisionMD-DesktopApp"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: |
+        1) Describe the problem or need this feature addresses.
+        2) Describe exactly what you want to happen.
+      placeholder: "Issue here..."
+    validations:
+      required: true
+  - type: upload
+    id: files
+    attributes:
+      label: File Upload
+      description: Attach any notes, sample files, or code related to this feature, especially if you have already started implementing it.
+    validations:
+      required: False

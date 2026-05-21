@@ -1,0 +1,18 @@
+name: Documentation issue
+description: Report missing, unclear, or incorrect documentation.
+title: "[Docs]: INSERT DOCUMENTATION ISSUE TITLE HERE"
+labels: ["documentation"]
+projects: ["VisionMD-DesktopApp"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: |
+        1) Describe which documentation needs to be changed and what should be changed.
+        2) Link to the page or name of the file or section to be documented.
+        3) Describe what is missing, unclear or incorrect.
+        4) Explain what the documentation should include.
+      placeholder: "Issue here..."
+    validations:
+      required: true
