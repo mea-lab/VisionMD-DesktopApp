@@ -2,7 +2,7 @@ name: Bug report
 description: Report something that is not working correctly.
 title: "[Bug]: INSERT BUG REPORT TITLE HERE"
 labels: ["bug"]
-projects: ["VisionMD-DesktopApp"]
+projects: ["mea-lab/2"]
 body:
   - type: textarea
     id: description
