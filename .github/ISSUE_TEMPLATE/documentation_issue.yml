@@ -2,7 +2,7 @@ name: Documentation issue
 description: Report missing, unclear, or incorrect documentation.
 title: "[Docs]: INSERT DOCUMENTATION ISSUE TITLE HERE"
 labels: ["documentation"]
-projects: ["VisionMD-DesktopApp"]
+projects: ["mea-lab/2"]
 body:
   - type: textarea
     id: description
