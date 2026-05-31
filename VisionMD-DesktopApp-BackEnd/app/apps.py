@@ -12,5 +12,10 @@ os.environ.setdefault("GRPC_CPP_LOG_LEVEL", "ERROR")
 os.environ.setdefault("TF_GPU_ALLOCATOR", "cuda_malloc_async")
 
 class AppConfig(AppConfig):
+    """Django application configuration for the VisionMD backend.
+
+    Configures app-level settings and metadata.
+    """
+
     default_auto_field = "django.db.models.BigAutoField"
     name = "app"

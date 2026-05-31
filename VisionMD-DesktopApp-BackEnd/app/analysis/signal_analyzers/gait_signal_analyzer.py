@@ -43,6 +43,16 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
     # --- START: Abstract methods ---
     # ------------------------------------------------------------------
     def analyze(self, phases, strides, poses_3D, fps) -> dict:
+        """Analyze the motion signal and extract key features.
+
+        Args:
+            signal: Input motion signal.
+            fs: Sampling frequency.
+
+        Returns:
+            dict: Analysis results with peaks, valleys, and metrics.
+        """
+
         if GaitSignalAnalyzer._gait_phase_order_idx is None:
             GaitSignalAnalyzer._gait_phase_order_idx = np.array(
                 [self._metrabs_joint_order.tolist().index(j) for j in GaitSignalAnalyzer._gait_phase_joint_order]

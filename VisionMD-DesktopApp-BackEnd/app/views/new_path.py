@@ -8,6 +8,12 @@ import shutil
 
 @api_view(['POST'])
 def new_path(request):
+    """Handle creation of a new analysis path.
+
+    Returns:
+        Response: API response with the new path information.
+    """
+
     video_id = request.GET.get('id')
 
     if not video_id:

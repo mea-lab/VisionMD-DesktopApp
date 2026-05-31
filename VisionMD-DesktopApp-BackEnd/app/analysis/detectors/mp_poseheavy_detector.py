@@ -11,6 +11,12 @@ class PoseHeavyDetector(BaseDetector):
     """
 
     def get_detector(self) -> vision.PoseLandmarker:
+        """Return the configured detector instance for this task.
+
+        Returns:
+            BaseDetector: The detector configured for processing video frames.
+        """
+
         running_mode = vision.RunningMode
         current_dir = os.path.dirname(__file__)
         base_options = python.BaseOptions(

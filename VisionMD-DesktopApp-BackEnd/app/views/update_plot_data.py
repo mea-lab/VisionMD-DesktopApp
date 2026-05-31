@@ -6,6 +6,12 @@ import scipy.interpolate as interpolate
 
 
 def updatePeaksAndValleys(inputJson):
+    """Update peaks and valleys data for signal visualization.
+
+    Returns:
+        Response: API response with peak and valley information.
+    """
+
     peaksData = inputJson['peaks_Data']
     peaksTime = inputJson['peaks_Time']
     valleysStartData =  inputJson['valleys_StartData'] 
@@ -147,6 +153,11 @@ def updatePeaksAndValleys(inputJson):
 
 @api_view(['POST'])
 def updatePlotData(request):
+    """Update plot data.
+
+    Update plot data for the views module.
+    """
+
     try:
         json_data = json.loads(request.POST['json_data'])
     except json.JSONDecodeError:

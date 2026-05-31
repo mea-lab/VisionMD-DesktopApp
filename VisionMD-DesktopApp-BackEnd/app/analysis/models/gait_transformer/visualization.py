@@ -106,11 +106,24 @@ def draw_keypoints(
 
 
 def get_trace_overlay_fn(phases, stride, walking_prob=None):
+    """Generate a trace overlay function for visualization.
+
+    Returns:
+        callable: Function that produces trace overlays.
+    """
+
 
     phases = np.reshape(phases, [-1, 4, 2])[:, :, 0]
     # phases = np.arctan2(phases[:, :, 1], phases[:, :, 0])
 
     def plot_trace(image, x, y, color=[255, 255, 255], width=3):
+        """Plot a single motion trace.
+
+        Args:
+            ax: Matplotlib axes object.
+            data: Trace data to plot.
+        """
+
         a = np.stack([x, y], axis=-1).astype(np.int32)
 
         image = image.copy()
@@ -123,13 +136,32 @@ def get_trace_overlay_fn(phases, stride, walking_prob=None):
     left_color = [40, 40, 255]
 
     def plot_traces(image, idx):
+        """Plot multiple motion traces on the same axes.
+
+        Args:
+            ax: Matplotlib axes object.
+            traces: List of trace data arrays.
+        """
+
         height, width, _ = image.shape
 
         # rescaling code as original version was designed for 1920x1080
         def scale_y(y, max_y):
+            """Scale Y-axis values for visualization.
+
+            Returns:
+                callable: Scaling function for Y values.
+            """
+
             return int(y * (height / max_y))
 
         def scale_x(x):
+            """Scale X-axis values for visualization.
+
+            Returns:
+                callable: Scaling function for X values.
+            """
+
             return int(x * (width / 1080))
 
         if idx > 50 and idx < len(phases) - 50:
@@ -229,6 +261,12 @@ def make_overlay(video: str, phases: np.array, stride: np.array, keypoints: np.a
     ankle_idx = np.array([13, 10])
 
     def overlay_fn(image, idx):
+        """Create an overlay function for visualization.
+
+        Returns:
+            callable: Overlay rendering function.
+        """
+
         image = draw_keypoints(image, keypoints[idx], color=(255, 255, 255))
 
         down = [left_down[idx], right_down[idx]]
@@ -261,6 +299,12 @@ def make_overlay(video: str, phases: np.array, stride: np.array, keypoints: np.a
 
 
 def jupyter_embed_video(video_filename: str, height: int | None = None):
+    """Embed a video in a Jupyter notebook cell.
+
+    Args:
+        video_path: Path to the video file.
+    """
+
 
     from IPython.display import HTML
     from base64 import b64encode

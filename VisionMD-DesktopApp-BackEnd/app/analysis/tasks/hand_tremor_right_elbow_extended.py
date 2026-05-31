@@ -77,6 +77,12 @@ class HandTremorRightElbowExtendedTask(BaseTask):
     # --- START: Abstract methods to be implemented by subclasses ---
     # ---------------------------------------------------------------
     def __init__(self):
+        """Initialize the instance.
+
+        Sets up the task with default configuration and prepares
+        the analysis pipeline.
+        """
+
         self.video_id = None
         self.video_fps = None
         self.video_rotation = None
@@ -459,6 +465,12 @@ class HandTremorRightElbowExtendedTask(BaseTask):
     # --- START: Custom helper methods definitions
     # -------------------------------------------------------------
     def calculate_pixel_conversion(self):
+        """Calculate pixel-to-real-world conversion factor.
+
+        Returns:
+            float: The pixel conversion multiplier.
+        """
+
         video_path = self.file_path
         Hand = 'right'
         cap = cv2.VideoCapture(video_path)
@@ -578,6 +590,15 @@ class HandTremorRightElbowExtendedTask(BaseTask):
         return pixel_to_mm_conversion_factor
 
     def bandpass_filter(self, signal, lowcut=2, highcut=10, fs=60):
+        """Apply a bandpass filter to the signal.
+
+        Args:
+            signal: Input signal array.
+
+        Returns:
+            numpy.ndarray: Filtered signal.
+        """
+
         # Design Butterworth bandpass filter
         nyq = 0.5 * fs
         low = lowcut / nyq
@@ -591,6 +612,15 @@ class HandTremorRightElbowExtendedTask(BaseTask):
 
     # Function to estimate the principal frequency of a signal
     def principal_frequency(self, signal, fs):
+        """Compute the principal frequency of a signal.
+
+        Args:
+            signal: Input signal array.
+
+        Returns:
+            float: The dominant frequency in Hz.
+        """
+
         f, Pxx = periodogram(signal, fs=fs)
         idx = np.argmax(Pxx[1:]) + 1  # skip DC component
         return f[idx], np.sqrt(Pxx[idx])  # amplitude is sqrt of power at peak

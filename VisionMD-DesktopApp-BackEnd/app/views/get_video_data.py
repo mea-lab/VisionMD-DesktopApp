@@ -10,6 +10,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 def verify_project_folder(project_path):
+    """Verify that the project folder exists and is accessible.
+
+    Returns:
+        bool: True if the folder exists and is valid.
+    """
+
     try:
         if not os.path.isdir(project_path):
             logger.error("Project path does not exist")
@@ -77,6 +83,12 @@ def verify_project_folder(project_path):
 
 @api_view(['GET'])
 def get_video_data(request):
+    """Retrieve video data and metadata for display.
+
+    Returns:
+        Response: API response with video data.
+    """
+
     all_projects_path = os.path.join(settings.MEDIA_ROOT, "video_uploads")
     folder_id = request.GET.get('id', None)
 

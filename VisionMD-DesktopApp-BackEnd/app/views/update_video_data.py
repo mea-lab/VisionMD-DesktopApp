@@ -7,6 +7,12 @@ from datetime import datetime, timezone
 
 @api_view(['POST'])
 def update_video_data(request):
+    """Update metadata and data associated with a video analysis.
+
+    Returns:
+        Response: API response with the update status.
+    """
+
 
     # Get all variables set up and check if folder and file paths exist
     video_id = request.GET.get('id', None)

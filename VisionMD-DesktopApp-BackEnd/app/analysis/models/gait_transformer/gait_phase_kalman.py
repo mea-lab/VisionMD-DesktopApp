@@ -23,6 +23,12 @@ I = jnp.eye(M + Ma)
 
 @jit
 def predict(x, P, dt, Q=Q):
+    """Predict the next state in the Kalman filter.
+
+    Returns:
+        tuple: Predicted state and covariance.
+    """
+
     Pdot = F @ P + P @ F.transpose() + Q
     P = P + Pdot * dt
 
@@ -33,6 +39,12 @@ def predict(x, P, dt, Q=Q):
 
 @jit
 def measurements(x):
+    """Process measurement data for the Kalman filter.
+
+    Returns:
+        numpy.ndarray: Processed measurement array.
+    """
+
     omega, _, phi1, phi2, phi3 = x
 
     return jnp.array(
@@ -51,6 +63,15 @@ def measurements(x):
 
 @jit
 def update_phases(x, P, z, Rp=Rp):
+    """Update gait phase estimates.
+
+    Args:
+        phases: Current phase estimates.
+
+    Returns:
+        numpy.ndarray: Updated phase estimates.
+    """
+
     I = jnp.eye(len(x))
 
     h = measurements(x)
@@ -65,6 +86,12 @@ def update_phases(x, P, z, Rp=Rp):
 
 @jit
 def rauch_tung_striebel_update(x, P, x_priori_next, P_priori_next, x_posteriori, P_posteriori):
+    """Perform the Rauch-Tung-Striebel backward smoothing pass.
+
+    Returns:
+        tuple: Smoothed states and covariances.
+    """
+
     C = P_posteriori @ F.transpose() @ jnp.linalg.inv(P_priori_next)
     x = x_posteriori + C @ (x - x_priori_next)
     P = P_posteriori + C @ (P - P_priori_next) @ C.transpose()
@@ -75,6 +102,12 @@ def rauch_tung_striebel_update(x, P, x_priori_next, P_priori_next, x_posteriori,
 # don't jit this as it will retrace every time it is called with
 # a different size
 def gait_kalman_smoother(phases, dt=1.0 / 30.0, smoothing=True):
+    """Run the full Kalman smoother for gait phase estimation.
+
+    Returns:
+        dict: Smoothed gait phase results.
+    """
+
 
     P = jnp.diag(jnp.array([1.0, 1.0, 1.0, 1.0, 1.0]))
     x = jnp.array([0.0, 0.0, jnp.pi, 3 * jnp.pi / 4, jnp.pi + 3 * jnp.pi / 4])
@@ -84,12 +117,24 @@ def gait_kalman_smoother(phases, dt=1.0 / 30.0, smoothing=True):
 
     @jit
     def constrain(x):
+        """Constrain the Kalman filter state to valid ranges.
+
+        Returns:
+            numpy.ndarray: Constrained state vector.
+        """
+
         from jax.nn import relu
 
         return jnp.array([x[0], relu(x[1]), *x[2:]])
 
     @jit
     def forward_update(carry, phase, dt=1.0 / 30.0):
+        """Perform the forward (filtering) update step.
+
+        Returns:
+            tuple: Forward-pass states and covariances.
+        """
+
         x, P = carry
         x, P = predict(x, P, dt)  # , Q=Q)
         x = constrain(x)
@@ -118,6 +163,12 @@ def gait_kalman_smoother(phases, dt=1.0 / 30.0, smoothing=True):
 
         @jit
         def backward_update(carry, y):
+            """Perform the backward (smoothing) update step.
+
+            Returns:
+                tuple: Backward-pass smoothed states and covariances.
+            """
+
             x, P = carry
 
             # x, P = rauch_tung_striebel_update(x, P, a_priori[i+1]['state'], a_priori[i+1]['covariance'], a_posteriori[i]['state'], a_posteriori[i]['covariance'])
@@ -138,6 +189,12 @@ def gait_kalman_smoother(phases, dt=1.0 / 30.0, smoothing=True):
 
 
 def compute_phases(states):
+    """Compute gait phases from the smoothed signal.
+
+    Returns:
+        numpy.ndarray: Array of gait phase labels.
+    """
+
     left_foot_down_phase = jnp.mod(states[:, 0], 2 * jnp.pi)
     right_foot_down_phase = jnp.mod(states[:, 0] + states[:, 2], 2 * jnp.pi)
     left_foot_up_phase = jnp.mod(states[:, 0] + states[:, 3], 2 * jnp.pi)
@@ -147,6 +204,12 @@ def compute_phases(states):
 
 
 def compute_event_times(phase, timestamps, velocity):
+    """Compute gait event times from phase data.
+
+    Returns:
+        list: Timestamps of gait events.
+    """
+
     crossings = jnp.where(jnp.diff(phase) < -jnp.pi)[0]
     remainders = jnp.pi * 2 - jnp.take(phase, crossings)
     residual_times = remainders / ((jnp.take(velocity, crossings) + jnp.take(velocity, crossings + 1)) / 2)
@@ -156,6 +219,12 @@ def compute_event_times(phase, timestamps, velocity):
 
 
 def get_event_times(states, timestamps):
+    """Retrieve computed gait event times.
+
+    Returns:
+        list: List of event timestamps.
+    """
+
     velocity = states[:, 1]
     phases = compute_phases(states).transpose()
     events = [compute_event_times(p, timestamps, velocity) for p in phases]
