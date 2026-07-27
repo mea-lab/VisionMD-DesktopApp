@@ -21,8 +21,6 @@ from app.analysis.signal_analyzers.gait_signal_analyzer import GaitSignalAnalyze
 from app.analysis.models.gait_transformer.gait_phase_transformer_old import load_default_model, get_gait_phase_stride_transformer, gait_phase_stride_inference
 from app.analysis.models.gait_transformer.gait_phase_kalman import gait_kalman_smoother, compute_phases, get_event_times
 
-
-
 class GaitTask(BaseTask):
 
     # ------------------------------------------------------------------
@@ -90,11 +88,15 @@ class GaitTask(BaseTask):
             tf.keras.backend.clear_session()
             context().clear_kernel_cache()
 
-            # 2) Getting signals
+            # 3) Getting turning information -- if turning, then process needs to be split into toward and away from camera segments
+            turning_events = self.get_turning_information(landmarks['poses3d'], self.fps)
+            turning_events_mirrored = self.get_turning_information(landmarks_mirrored['poses3d'], self.fps)
+
+            # 4) Getting signals
             phases, strides, signals = self.calculate_signal(landmarks['poses3d'], self.height_cm * 10)
             phases_mirrored, strides_mirrored, signals_mirrored = self.calculate_signal(landmarks_mirrored['poses3d'], self.height_cm * 10)
 
-            # 3) Get signal analyzer to use it to get feature results
+            # 5) Get signal analyzer to use it to get feature results
             signal_analyzer = self.get_signal_analyzer()
             print("Analyzing original signal...")
             try:
@@ -119,10 +121,10 @@ class GaitTask(BaseTask):
             tf.keras.backend.clear_session()
             context().clear_kernel_cache()
 
-            # 5) Get landmark colors
+            # 6) Get landmark colors
             landmark_colors = self.calculate_landmark_colors(landmarks['poses3d'], gait_event_dic, self.fps)
 
-            # 4) Build up response to API call
+            # 7) Build up response to API call
             response = {}
             response['File name'] = self.file_name
             response['Task name'] = self.task_name
@@ -142,7 +144,7 @@ class GaitTask(BaseTask):
         except Exception as e:
             return Response(f"Error with gait analysis: {str(e)}", status=500)
         finally:
-            # 5) Clean up memory
+            # 8) Clean up memory
             if hasattr(self, "video") and self.video is not None:
                 self.video.release()
             tf.keras.backend.clear_session()
@@ -321,6 +323,134 @@ class GaitTask(BaseTask):
         """
         return GaitSignalAnalyzer()
 
+    def get_turning_information(self, poses3D, fps=60, window_size=11, threshold=0.5) -> dict:
+        """
+        Analyzes the 3D poses to detect turning events based on the orientation of the pelvis.
+
+        Parameters:
+            poses3D (np.ndarray): Array of 3D keypoints with shape (T, J, 3).
+            window_size (int): Size of the moving window for smoothing.
+            threshold (float): Threshold for detecting turns based on orientation change.
+
+        Returns:
+            dict: A dictionary containing detected turning events and their corresponding frame indices.
+        """
+
+        is_turning = False
+        turning_events = {
+            "is_turning": is_turning, # This should be set to True if a turn is detected
+            "turn_start_frame": [], # This should contain the frame indices where turns start
+            "turn_end_frames": [], # This should contain the frame indices where turns end
+            "turn_duration": [], # This should contain the duration of each detected turn
+            "turn_speed": [], # This should contain the speed of turning
+        }
+
+        from scipy.optimize import curve_fit
+        def sigmoid(t, a, b, c, d):
+            return a + b / (1 + np.exp(-(t - c) / d))
+
+
+        pos_divider = round(self.fps / 30.0)
+        if GaitTask._gait_phase_transformer is None:
+                GaitTask._gait_phase_transformer = load_default_model(pos_divider=pos_divider)
+        GaitTask._gait_phase_order_idx = np.array([self._metrabs_joint_order.tolist().index(j) for j in GaitTask._gait_phase_joint_order])    
+
+        # Preprocess the 3D keypoints provided by metrabs
+        keypoints = poses3D.copy()[:, GaitTask._gait_phase_order_idx,:]
+        keypoints = keypoints / 1000.0
+        keypoints = keypoints[:, :, [0, 2, 1]]
+        keypoints[:, :, 2] *= -1
+
+        #this operation produces a 3d vector
+        HIP_dist = keypoints[:, 1, :] - keypoints[:, 4, :] # 1 is right hip, 4 is left hip
+        # we are only intested in the mediolateral change
+        HIP_dist_ml = HIP_dist[:, 0]
+
+
+        #check if there is a zero crossing, indicating turning 
+        zero_crossings = np.where(np.diff(np.sign(HIP_dist_ml)))[0]
+        if len(zero_crossings) > 0:
+            #smooth the signal and remove NaN values
+            valid = np.isfinite(HIP_dist_ml)
+            if valid.sum() > 10:
+                HIP_dist_ml = np.interp(np.arange(len(HIP_dist_ml)), np.where(valid)[0], HIP_dist_ml[valid])
+                HIP_dist_ml_smooth = np.convolve(
+                        np.pad(HIP_dist_ml, (window_size // 2, window_size // 2), mode="edge"),
+                        np.ones(window_size) / window_size,
+                        mode="valid"
+                )
+                
+                a0 = np.median(HIP_dist_ml_smooth[-10:]) if len(HIP_dist_ml_smooth) >= 10 else HIP_dist_ml_smooth[-1]
+                b0 = np.median(HIP_dist_ml_smooth[:10]) - a0 if len(HIP_dist_ml_smooth) >= 10 else HIP_dist_ml_smooth[0] - a0
+                c0 = np.argmax(np.abs(np.gradient(HIP_dist_ml_smooth)))
+                d0 = max(5, len(HIP_dist_ml_smooth) / 20)
+            
+                try:
+                    popt, _ = curve_fit(
+                        sigmoid,
+                        np.arange(len(HIP_dist_ml_smooth)),
+                        HIP_dist_ml_smooth,
+                        p0=[a0, b0, c0, d0],
+                        maxfev=10000
+                    )
+                except Exception as e:
+                    print(f"Fit for estimation of turning parameters failed with error: {e}")
+                    return turning_events
+            
+                a, b, c, d = popt
+            
+                if abs(d) < 1e-6:
+                    print(f"Fit for estimation of turning parameters failed")
+                    return turning_events
+
+
+                # Calculate the turning speed and duration
+                p_start = 0.01
+                p_end = 0.99
+                start_frame = int(round(c + d * np.log(p_start / (1 - p_start))))
+                end_frame   = int(round(c + d * np.log(p_end   / (1 - p_end))))
+                mid_frame = int(np.round(c))
+            
+                start_frame = max(0, min(start_frame, len(HIP_dist_ml_smooth) - 1))
+                mid_frame = max(0, min(mid_frame, len(HIP_dist_ml_smooth) - 1))
+                end_frame = max(0, min(end_frame, len(HIP_dist_ml_smooth) - 1))
+            
+                if end_frame <= start_frame:
+                    return turning_events
+            
+                turning_duration = (end_frame - start_frame) / fps
+            
+            
+                segment = keypoints[start_frame:end_frame + 1]    
+                # body center during turn
+                body_center = np.nanmean(segment, axis=1)   # (n_turn_frames, 3)   
+                # frame-to-frame displacement
+                disp = np.linalg.norm(
+                    np.diff(body_center, axis=0),
+                    axis=1
+                )    
+                # frame-to-frame velocity
+                velocity_per_frame = disp * fps    
+                # average turning velocity
+                turning_velocity = np.nanmean(velocity_per_frame)
+
+
+                #store all results
+                turning_events["is_turning"] = True
+                turning_events["turn_start_frame"]= start_frame 
+                turning_events["turn_end_frames"]= end_frame
+                turning_events["turn_duration"]= turning_duration
+                turning_events["turn_speed"] = turning_velocity
+
+            else:
+                return turning_events
+
+        else:
+            return turning_events
+           
+
+        return turning_events
+        
     
 
     def calculate_signal(self, poses3D, height_mm, L=60) -> dict:
@@ -539,6 +669,7 @@ class GaitTask(BaseTask):
         if missing_mask.sum() > 0:
             print(f"Warning: {missing_mask.sum()} frames found no person, saved under undetected dir.")
         print(f"Completed processing {file_name}")
+
 
         return all_preds, mirrored_all_preds
 
