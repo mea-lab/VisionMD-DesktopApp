@@ -39,3 +39,19 @@ models/
 Videos
 .codex
 .agents
+
+# environment
+.venv-visionmd-arm64
+
+# Keep the vendored PyTorch MeTRAbs inference implementation under version
+# control, but never commit its separately downloaded 475 MB checkpoint.
+!VisionMD-DesktopApp-BackEnd/app/analysis/models/
+!VisionMD-DesktopApp-BackEnd/app/analysis/models/metrabs_pytorch/
+!VisionMD-DesktopApp-BackEnd/app/analysis/models/metrabs_pytorch/**
+!VisionMD-DesktopApp-BackEnd/app/analysis/models/wilor_mini/
+!VisionMD-DesktopApp-BackEnd/app/analysis/models/wilor_mini/**
+VisionMD-DesktopApp-BackEnd/app/analysis/models/metrabs_pytorch/__pycache__/
+VisionMD-DesktopApp-BackEnd/app/analysis/models/metrabs_pytorch/**/*.pyc
+VisionMD-DesktopApp-BackEnd/app/analysis/models/metrabs_pytorch/scripts/*.pt
+VisionMD-DesktopApp-BackEnd/app/analysis/models/metrabs_eff2l_384px_800k_28ds_pytorch/
+VisionMD-DesktopApp-BackEnd/app/analysis/models/wilor_mini/pretrained_models/

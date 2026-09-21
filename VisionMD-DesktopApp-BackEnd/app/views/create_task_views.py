@@ -48,8 +48,14 @@ def generate_task_urlpatterns():
     urlpatterns = []
 
     for file in os.listdir(tasks_dir):
-        # Only consider .py files, ignore base_task.py and __init__.py
-        if file.endswith(".py") and file not in ["base_task.py", "__init__.py"]:
+        # Only consider concrete task modules.  Private modules (whose file
+        # name begins with an underscore) hold shared implementation details
+        # and deliberately do not get a public API route.
+        if (
+            file.endswith(".py")
+            and file not in ["base_task.py", "__init__.py"]
+            and not file.startswith("_")
+        ):
             file_name = file[:-3]
 
             # Build a Django view function on the fly

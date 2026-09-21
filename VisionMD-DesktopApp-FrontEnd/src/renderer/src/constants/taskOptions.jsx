@@ -17,6 +17,8 @@ const taskOptions = [
   { value: 'Finger Tap Right', label: 'Finger Tap Right' },
   { value: 'Hand Movement Left', label: 'Hand Movement Left' },
   { value: 'Hand Movement Right', label: 'Hand Movement Right' },
+  { value: 'Hand Pronation Left', label: 'Hand Pronation Left' },
+  { value: 'Hand Pronation Right', label: 'Hand Pronation Right' },
   { value: 'Toe tapping Left', label: 'Toe tapping Left' },
   { value: 'Toe tapping Right', label: 'Toe tapping Right' },
   { value: 'Leg agility Left', label: 'Leg agility Left' },
@@ -69,4 +71,3 @@ if (errors.length > 0) {
 }
 
 export { taskOptions };
-
