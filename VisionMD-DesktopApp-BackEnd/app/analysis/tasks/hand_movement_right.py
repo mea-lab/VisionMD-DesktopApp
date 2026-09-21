@@ -42,7 +42,7 @@ class HandMovementRightTask(BaseTask):
         "PINKY_PIP": 18,
         "PINKY_DIP": 19,
         "PINKY_TIP": 20
-    }
+        }
 # ----------------------------------------------------------------
 # --- END: Abstract properties definitions
 # ----------------------------------------------------------------
@@ -79,8 +79,13 @@ class HandMovementRightTask(BaseTask):
 
             # 2. Extract landmarks from video
             essential_landmarks, all_landmarks = self.extract_landmarks()
-            essential_landmarks = self.interpolate_missing_landmarks(essential_landmarks)
-            all_landmarks = self.interpolate_missing_landmarks(all_landmarks)
+            essential_landmarks = self.interpolate_missing_landmarks2(essential_landmarks)
+            # all_landmarks = self.interpolate_missing_landmarks2(all_landmarks)
+
+            all_landmarks = self.clean_display_track(all_landmarks)
+
+            essential_landmarks = self._return_essential_landmarks(all_landmarks)
+
             
             # 3. Calculate normalization factor from landmarks
             normalization_factor = self.calculate_normalization_factor(all_landmarks)
@@ -186,6 +191,7 @@ class HandMovementRightTask(BaseTask):
         detector = HandDetector().get_detector()
         essential_landmarks = []
         all_landmarks = []
+        world_landmarks = []
         enlarged_coords = (
             self.enlarged_bounding_box['x'],
             self.enlarged_bounding_box['y'],
@@ -263,6 +269,8 @@ class HandMovementRightTask(BaseTask):
                 math.dist(ring_finger, wrist)
             ) / 3.0
 
+            distance = np.median([math.dist(index_finger, wrist),math.dist(middle_finger, wrist),math.dist(ring_finger, wrist)])
+
             prev_dist = distance
             signal.append(distance)
 
@@ -317,6 +325,23 @@ class HandMovementRightTask(BaseTask):
             continue
 
         return max(factors) if factors else 1.0
+    
+    @staticmethod
+    def _return_essential_landmarks(all_landmarks):
+
+        index_finger = HandMovementRightTask.LANDMARKS["INDEX_FINGER_TIP"]
+        middle_finger = HandMovementRightTask.LANDMARKS["MIDDLE_FINGER_TIP"]
+        ring_finger = HandMovementRightTask.LANDMARKS["RING_FINGER_TIP"]
+        wrist = HandMovementRightTask.LANDMARKS["WRIST"]
+
+        essential_landmarks = []
+        for landmarks in all_landmarks:
+            essential = np.array(landmarks)[[index_finger, middle_finger, ring_finger, wrist]]
+            essential_landmarks.append(essential.tolist())
+
+        return essential_landmarks
+
+
 # -------------------------------------------------------------
 # --- END: Abstract methods definitions
 # -------------------------------------------------------------

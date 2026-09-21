@@ -1,5 +1,6 @@
+from abc import abstractmethod
+
 import numpy as np
-import scipy.signal as signal
 import scipy.signal as signal
 import scipy.interpolate as interpolate
 import tensorflow as tf
@@ -42,7 +43,7 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
     # ------------------------------------------------------------------
     # --- START: Abstract methods ---
     # ------------------------------------------------------------------
-    def analyze(self, phases, strides, poses_3D, fps) -> dict:
+    def analyze(self, phases, strides, poses_3D, fps, is_mirrored=False) -> dict:
         if GaitSignalAnalyzer._gait_phase_order_idx is None:
             GaitSignalAnalyzer._gait_phase_order_idx = np.array(
                 [self._metrabs_joint_order.tolist().index(j) for j in GaitSignalAnalyzer._gait_phase_joint_order]
@@ -53,6 +54,17 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
         timestamps = np.arange(state.shape[0])
         gait_event_dic = get_event_times(state, timestamps)
 
+
+        cleaned_gait_event_dic = self.clean_gait_event_dic(gait_event_dic, poses_3D, fps)
+        if self._has_minimum_events(cleaned_gait_event_dic):
+            gait_event_dic = cleaned_gait_event_dic
+
+
+
+        # if is_mirrored:
+        #     # Apply mirroring to the gait event dictionary
+        #     gait_event_dic = self._mirror_gait_events(gait_event_dic)
+
         results = self.analyze_gait_video_features(gait_event_dic, poses_3D, GaitSignalAnalyzer._gait_phase_order_idx, fps)
 
         return results, gait_event_dic
@@ -60,7 +72,19 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
 
     # ------------------------------------------------------------------
     # --- END: Abstract methods ---
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------------
+
+    def _mirror_gait_events(self, gait_event_dic):
+        """
+        Mirror the gait events by swapping left and right events.
+        """
+        mirrored_gait_event_dic = {
+            'left_down': gait_event_dic['right_down'],
+            'left_up': gait_event_dic['right_up'],
+            'right_down': gait_event_dic['left_down'],
+            'right_up': gait_event_dic['left_up']
+        }
+        return mirrored_gait_event_dic
 
 
 
@@ -69,7 +93,131 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
     # ------------------------------------------------------------------
     # --- START: Helper methods ---
     # ------------------------------------------------------------------
-    
+    def clean_gait_event_dic(self, gait_event_dic, keypoints_3D, fps):
+        """
+        Remove likely fidget events and keep temporally consistent gait cycles.
+
+        Strategy:
+        1) Debounce events that are implausibly close in time.
+        2) Keep heel-strike events only when movement magnitude is large enough.
+        3) Rebuild toe-off arrays to align with remaining heel-strikes.
+        """
+        n_frames = keypoints_3D.shape[0]
+        min_frames_between_events = max(1, int(round(0.10 * fps)))
+        min_step_frames = max(1, int(round(0.25 * fps)))
+        max_step_frames = max(min_step_frames + 1, int(round(2.00 * fps)))
+
+        # Thresholds tuned to suppress foot fidgeting while keeping true steps.
+        min_step_length_m = 0.05
+        min_pelvis_displacement_m = 0.015
+
+        def sanitize_events(events):
+            arr = np.asarray(events, dtype=float)
+            if arr.size == 0:
+                return np.array([], dtype=float)
+            arr = np.round(arr).astype(int)
+            arr = arr[(arr >= 0) & (arr < n_frames)]
+            if arr.size == 0:
+                return np.array([], dtype=float)
+            arr = np.unique(np.sort(arr))
+            return arr.astype(float)
+
+        def debounce(events, min_gap):
+            arr = sanitize_events(events)
+            if arr.size == 0:
+                return arr
+            kept = [arr[0]]
+            for e in arr[1:]:
+                if e - kept[-1] >= min_gap:
+                    kept.append(e)
+            return np.asarray(kept, dtype=float)
+
+        def get_previous_event(event_array, t):
+            prev = event_array[event_array < t]
+            if prev.size == 0:
+                return None
+            return float(prev[-1])
+
+        def filter_strikes_by_movement(primary_strikes, opposite_strikes, pelvis_cum_disp, z_hip):
+            if primary_strikes.size == 0:
+                return primary_strikes
+
+            kept = []
+            for strike in primary_strikes:
+                strike_idx = int(round(strike))
+                opposite_prev = get_previous_event(opposite_strikes, strike)
+
+                # Keep very first usable event to avoid removing all cycles at start.
+                if opposite_prev is None:
+                    kept.append(strike)
+                    continue
+
+                opp_idx = int(round(opposite_prev))
+                dt = strike_idx - opp_idx
+                if dt < min_step_frames or dt > max_step_frames:
+                    continue
+
+                step_len = float(abs(z_hip[strike_idx] - z_hip[opp_idx]))
+                i0, i1 = sorted((opp_idx, strike_idx))
+                pelvis_disp = float(pelvis_cum_disp[i1] - pelvis_cum_disp[i0])
+
+                if step_len >= min_step_length_m or pelvis_disp >= min_pelvis_displacement_m:
+                    kept.append(strike)
+
+            return np.asarray(kept, dtype=float)
+
+        def align_toe_offs(downs, ups):
+            downs_arr = sanitize_events(downs)
+            ups_arr = sanitize_events(ups)
+            if downs_arr.size == 0 or ups_arr.size == 0:
+                return np.array([], dtype=float)
+
+            aligned = []
+            for i, d in enumerate(downs_arr):
+                next_d = downs_arr[i + 1] if i + 1 < downs_arr.size else np.inf
+                candidates = ups_arr[(ups_arr > d) & (ups_arr < next_d)]
+                if candidates.size > 0:
+                    aligned.append(candidates[0])
+
+            return np.asarray(aligned, dtype=float)
+
+        # Use pelvis and hip depth movement as spatial validation for true steps.
+        pelvis_idx = int(np.where(self._metrabs_joint_order == 'pelv')[0][0])
+        pelvis = keypoints_3D[:, pelvis_idx, :][:, [0, 2]] / 1000.0
+        pelvis_delta = np.diff(pelvis, axis=0)
+        pelvis_speed = np.linalg.norm(pelvis_delta, axis=1)
+        pelvis_cum_disp = np.concatenate([[0.0], np.cumsum(pelvis_speed)])
+
+        kp = keypoints_3D[:, self._gait_phase_order_idx] / 1000.0
+        kp[:, :, 1] *= -1.0
+        z_hip = kp[:, 0, 2]
+
+        ld = debounce(gait_event_dic.get('left_down', []), min_frames_between_events)
+        lu = debounce(gait_event_dic.get('left_up', []), min_frames_between_events)
+        rd = debounce(gait_event_dic.get('right_down', []), min_frames_between_events)
+        ru = debounce(gait_event_dic.get('right_up', []), min_frames_between_events)
+
+        ld_f = filter_strikes_by_movement(ld, rd, pelvis_cum_disp, z_hip)
+        rd_f = filter_strikes_by_movement(rd, ld, pelvis_cum_disp, z_hip)
+
+        lu_f = align_toe_offs(ld_f, lu)
+        ru_f = align_toe_offs(rd_f, ru)
+
+        return {
+            'left_down': ld_f,
+            'left_up': lu_f,
+            'right_down': rd_f,
+            'right_up': ru_f,
+        }
+
+    def _has_minimum_events(self, gait_event_dic):
+        """
+        Require at least one event per channel after cleaning.
+        """
+        required = ('left_down', 'left_up', 'right_down', 'right_up')
+        return all(len(np.asarray(gait_event_dic.get(k, []))) > 0 for k in required)
+
+
     def analyze_gait_video_features(
         self,
         gait_event_dic: dict,
@@ -210,12 +358,15 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
         if lhs[0] < rhs[0]:
             m = min(len(lhs_idx) - 1, len(rhs_idx))
             sl_left  = np.abs(z_hip[lhs_idx[1:m+1]] - z_hip[rhs_idx[:m]])
+            sl_left = sl_left[1:]  # Exclude the first step length for left side, it doesn't seem to be reliable
             sl_right = np.abs(z_hip[rhs_idx[:m]]    - z_hip[lhs_idx[:m]])
+            sl_right = sl_right[1:]  # Exclude the first step length for right side, it doesn't seem to be reliable
         else:
             m = min(len(lhs_idx), len(rhs_idx) - 1)
             sl_left  = np.abs(z_hip[lhs_idx[:m]]      - z_hip[rhs_idx[:m]])
+            sl_left = sl_left[1:]  # Exclude the first step length for left side, it doesn't seem to be reliable
             sl_right = np.abs(z_hip[rhs_idx[1:m+1]]   - z_hip[lhs_idx[:m]])
-
+            sl_right = sl_right[1:]  # Exclude the first step length for right side, it doesn't seem to be reliable
 
         all_step_lengths = np.concatenate([sl_left, sl_right])
         strikes   = np.sort(np.concatenate([lhs_idx, rhs_idx]))

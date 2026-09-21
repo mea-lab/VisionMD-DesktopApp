@@ -1,3 +1,4 @@
+from abc import abstractmethod
 import os
 import math
 import json
@@ -16,6 +17,7 @@ from PIL import Image
 from .base_task import BaseTask
 from django.conf import settings
 from rest_framework.response import Response
+from scipy.signal import butter, filtfilt
 
 from app.analysis.signal_analyzers.gait_signal_analyzer import GaitSignalAnalyzer
 from app.analysis.models.gait_transformer.gait_phase_transformer_old import load_default_model, get_gait_phase_stride_transformer, gait_phase_stride_inference
@@ -72,6 +74,7 @@ class GaitTask(BaseTask):
             self.subject_bounding_boxes = None
 
 
+
     def api_response(self, request):
         """
         Function that handles the api response for each task
@@ -91,30 +94,65 @@ class GaitTask(BaseTask):
             # 3) Getting turning information -- if turning, then process needs to be split into toward and away from camera segments
             turning_events = self.get_turning_information(landmarks['poses3d'], self.fps)
             turning_events_mirrored = self.get_turning_information(landmarks_mirrored['poses3d'], self.fps)
+            consolidated_turning_events = self.consolidate_turning_information(
+                turning_events,
+                turning_events_mirrored,
+                landmarks['poses3d'].shape[0],
+            )
 
-            # 4) Getting signals
-            phases, strides, signals = self.calculate_signal(landmarks['poses3d'], self.height_cm * 10)
-            phases_mirrored, strides_mirrored, signals_mirrored = self.calculate_signal(landmarks_mirrored['poses3d'], self.height_cm * 10)
-
-            # 5) Get signal analyzer to use it to get feature results
+            # 4) Get signal analyzer to use it to get feature results
             signal_analyzer = self.get_signal_analyzer()
-            print("Analyzing original signal...")
-            try:
-                results, gait_event_dic = signal_analyzer.analyze(phases, strides, landmarks['poses3d'], self.fps)
-            except Exception as e:
-                print("Analyzing original signal failed")
-                raise Exception(e)
-            print("Analyzing original signal passed")
-            
 
-            print("Analyzing mirrored signal...")
-            try:
-                results_mirrored, gait_event_dic_mirrored = signal_analyzer.analyze(phases_mirrored, strides_mirrored, landmarks_mirrored['poses3d'], self.fps)
-            except Exception as e:
-                print("Analyzing mirrored signal failed")
-                raise Exception(e)
-            avg_results = self.calculate_average_features(results, results_mirrored)
-            print("Analyzing mirrored signal passed")
+            # 5) If turning is detected, analyze toward and away segments and average them.
+            if consolidated_turning_events["is_turning"]:
+                try:
+                    segment_results = self.analyze_turn_segments(
+                        landmarks['poses3d'],
+                        landmarks_mirrored['poses3d'],
+                        consolidated_turning_events,
+                        signal_analyzer,
+                    )
+                    avg_results = segment_results["combined"]
+                    segment_metrics = {
+                        "toward": segment_results["toward"],
+                        "away": segment_results["away"],
+                    }
+                    signals = segment_results["signals"]
+                    gait_event_dic = segment_results["gait_event_dic"]
+                    gait_event_dic_mirrored = segment_results["gait_event_dic_mirrored"]
+                except Exception as segment_exc:
+                    print(f"Segmented turn analysis failed; falling back to full-track averaging. Error: {segment_exc}")
+                    print("Analyzing original signal...")
+                    original_full = self.analyze_track(landmarks['poses3d'], signal_analyzer)
+                    print("Analyzing original signal passed")
+
+                    print("Analyzing mirrored signal...")
+                    mirrored_full = self.analyze_track(landmarks_mirrored['poses3d'], signal_analyzer, is_mirrored=True)
+                    print("Analyzing mirrored signal passed")
+
+                    avg_results = self.calculate_average_features(
+                        original_full["results"], mirrored_full["results"]
+                    )
+                    segment_metrics = None
+                    signals = original_full["signals"]
+                    gait_event_dic = original_full["gait_event_dic"]
+                    gait_event_dic_mirrored = mirrored_full["gait_event_dic"]
+            else:
+                print("Analyzing original signal...")
+                original_full = self.analyze_track(landmarks['poses3d'], signal_analyzer)
+                print("Analyzing original signal passed")
+
+                print("Analyzing mirrored signal...")
+                mirrored_full = self.analyze_track(landmarks_mirrored['poses3d'], signal_analyzer, is_mirrored=True)
+                print("Analyzing mirrored signal passed")
+
+                avg_results = self.calculate_average_features(
+                    original_full["results"], mirrored_full["results"]
+                ) 
+                segment_metrics = None
+                signals = original_full["signals"]
+                gait_event_dic = original_full["gait_event_dic"]
+                gait_event_dic_mirrored = mirrored_full["gait_event_dic"]
 
             del GaitTask._gait_phase_transformer, signal_analyzer
             GaitTask._gait_phase_transformer, signal_analyzer = None, None
@@ -122,7 +160,9 @@ class GaitTask(BaseTask):
             context().clear_kernel_cache()
 
             # 6) Get landmark colors
-            landmark_colors = self.calculate_landmark_colors(landmarks['poses3d'], gait_event_dic, self.fps)
+            landmark_colors = self.calculate_landmark_colors(
+                landmarks['poses3d'], gait_event_dic, self.fps
+            )
 
             # 7) Build up response to API call
             response = {}
@@ -141,10 +181,15 @@ class GaitTask(BaseTask):
                 for k, v in gait_event_dic_mirrored.items()
             }
             response['landmark_colors'] = landmark_colors.tolist()
+
+            if consolidated_turning_events["is_turning"]:
+                response['turning_metadata'] = consolidated_turning_events
+                if segment_metrics is not None:
+                    response['segment_metrics'] = segment_metrics
         except Exception as e:
             return Response(f"Error with gait analysis: {str(e)}", status=500)
         finally:
-            # 8) Clean up memory
+            # 9) Clean up memory
             if hasattr(self, "video") and self.video is not None:
                 self.video.release()
             tf.keras.backend.clear_session()
@@ -340,7 +385,7 @@ class GaitTask(BaseTask):
         turning_events = {
             "is_turning": is_turning, # This should be set to True if a turn is detected
             "turn_start_frame": [], # This should contain the frame indices where turns start
-            "turn_end_frames": [], # This should contain the frame indices where turns end
+            "turn_end_frame": [], # This should contain the frame indices where turns end
             "turn_duration": [], # This should contain the duration of each detected turn
             "turn_speed": [], # This should contain the speed of turning
         }
@@ -350,9 +395,9 @@ class GaitTask(BaseTask):
             return a + b / (1 + np.exp(-(t - c) / d))
 
 
-        pos_divider = round(self.fps / 30.0)
-        if GaitTask._gait_phase_transformer is None:
-                GaitTask._gait_phase_transformer = load_default_model(pos_divider=pos_divider)
+        #pos_divider = round(self.fps / 30.0)
+        #if GaitTask._gait_phase_transformer is None:
+        #       GaitTask._gait_phase_transformer = load_default_model(pos_divider=pos_divider)
         GaitTask._gait_phase_order_idx = np.array([self._metrabs_joint_order.tolist().index(j) for j in GaitTask._gait_phase_joint_order])    
 
         # Preprocess the 3D keypoints provided by metrabs
@@ -432,13 +477,13 @@ class GaitTask(BaseTask):
                 # frame-to-frame velocity
                 velocity_per_frame = disp * fps    
                 # average turning velocity
-                turning_velocity = np.nanmean(velocity_per_frame)
+                turning_velocity = float(np.nanmean(velocity_per_frame))
 
 
                 #store all results
                 turning_events["is_turning"] = True
                 turning_events["turn_start_frame"]= start_frame 
-                turning_events["turn_end_frames"]= end_frame
+                turning_events["turn_end_frame"]= end_frame
                 turning_events["turn_duration"]= turning_duration
                 turning_events["turn_speed"] = turning_velocity
 
@@ -463,7 +508,7 @@ class GaitTask(BaseTask):
             L (int): Window length for inference
             pos_divider (int): Positional divider used in model loading
         """
-
+        # pos_divider is used to adjust the model for different frame rates. The default is set for 30 fps.
         pos_divider = round(self.fps / 30.0)
         if GaitTask._gait_phase_transformer is None:
             GaitTask._gait_phase_transformer = load_default_model(pos_divider=pos_divider)
@@ -476,8 +521,7 @@ class GaitTask(BaseTask):
         keypoints = keypoints - np.mean(keypoints, axis=1, keepdims=True)
         keypoints = keypoints[:, :, [0, 2, 1]]
         keypoints[:, :, 2] *= -1
-
-
+        
         # Run inference
         height_arr = np.array(height_mm, dtype=float)
         phases, strides = gait_phase_stride_inference(keypoints, height_arr, GaitTask._gait_phase_transformer, int(L * pos_divider))
@@ -767,6 +811,189 @@ class GaitTask(BaseTask):
         }
                 
         return average
+
+    def average_feature_dicts(self, features_a, features_b):
+        """
+        Average two feature dictionaries over common numeric keys.
+        """
+        common_keys = set(features_a.keys()) & set(features_b.keys())
+        averaged = {}
+        for key in common_keys:
+            value_a = features_a[key]
+            value_b = features_b[key]
+            if isinstance(value_a, (int, float)) and isinstance(value_b, (int, float)):
+                averaged[key] = (float(value_a) + float(value_b)) / 2.0
+        return averaged
+
+    def consolidate_turning_information(self, turning_events, turning_events_mirrored, total_frames):
+        """
+        Consolidate turning metadata using original and mirrored turn detections.
+
+        Rules:
+        - start/end frame indices are ints derived from both detections
+        - duration and speed are averaged
+        """
+        has_turn_original = bool(turning_events.get("is_turning", False))
+        has_turn_mirrored = bool(turning_events_mirrored.get("is_turning", False))
+        is_turning = has_turn_original or has_turn_mirrored
+
+        consolidated = {
+            "is_turning": is_turning,
+            "turn_start_frame": [],
+            "turn_end_frame": [],
+            "turn_duration": [],
+            "turn_speed": [],
+        }
+
+        if not is_turning:
+            return consolidated
+
+        start_candidates = []
+        end_candidates = []
+        duration_candidates = []
+        speed_candidates = []
+
+        for events in (turning_events, turning_events_mirrored):
+            if not bool(events.get("is_turning", False)):
+                continue
+
+            start_val = events.get("turn_start_frame", None)
+            end_val = events.get("turn_end_frame", None)
+            duration_val = events.get("turn_duration", None)
+            speed_val = events.get("turn_speed", None)
+
+            if isinstance(start_val, (int, float)):
+                start_candidates.append(float(start_val))
+            if isinstance(end_val, (int, float)):
+                end_candidates.append(float(end_val))
+            if isinstance(duration_val, (int, float)):
+                duration_candidates.append(float(duration_val))
+            if isinstance(speed_val, (int, float)):
+                speed_candidates.append(float(speed_val))
+
+        if len(start_candidates) == 0 or len(end_candidates) == 0:
+            consolidated["is_turning"] = False
+            return consolidated
+
+        max_idx = max(0, int(total_frames) - 1)
+        start_idx = int(np.clip(round(np.mean(start_candidates)), 0, max_idx))
+        end_idx = int(np.clip(round(np.mean(end_candidates)), 0, max_idx))
+
+        if end_idx <= start_idx:
+            consolidated["is_turning"] = False
+            return consolidated
+
+        consolidated["turn_start_frame"] = start_idx
+        consolidated["turn_end_frame"] = end_idx
+        consolidated["turn_duration"] = float(np.mean(duration_candidates)) if len(duration_candidates) > 0 else 0.0
+        consolidated["turn_speed"] = float(np.mean(speed_candidates)) if len(speed_candidates) > 0 else 0.0
+
+        return consolidated
+
+    def split_turn_segments(self, poses3d, turning_metadata):
+        """
+        Split input poses into two segments:
+        - toward: frame 0 .. turn_start_frame (inclusive)
+        - away: turn_end_frame .. last frame
+        """
+        turn_start = int(turning_metadata["turn_start_frame"])
+        turn_end = int(turning_metadata["turn_end_frame"])
+
+        toward_poses = poses3d[:turn_start + 1]
+        away_poses = poses3d[turn_end:]
+
+        return toward_poses, away_poses
+
+    def analyze_track(self, poses3d, signal_analyzer, is_mirrored=False):
+        """
+        Run full signal extraction and gait feature analysis for a single track.
+        """
+        if self.height_cm is None:
+            raise ValueError("Missing subject height for gait analysis.")
+        if self.fps is None:
+            raise ValueError("Missing FPS for gait analysis.")
+
+        phases, strides, signals = self.calculate_signal(poses3d, self.height_cm * 10)
+        results, gait_event_dic = signal_analyzer.analyze(phases, strides, poses3d, self.fps, is_mirrored=is_mirrored)
+        return {
+            "phases": phases,
+            "strides": strides,
+            "signals": signals,
+            "results": results,
+            "gait_event_dic": gait_event_dic,
+        }
+
+    def merge_segment_gait_events(self, toward_events, away_events, away_offset):
+        """
+        Merge segment-local gait events into full-track frame coordinates.
+        """
+        merged = {}
+        keys = set(toward_events.keys()) | set(away_events.keys())
+        for key in keys:
+            toward_arr = np.asarray(toward_events.get(key, []), dtype=float)
+            away_arr = np.asarray(away_events.get(key, []), dtype=float) + float(away_offset)
+            if toward_arr.size == 0 and away_arr.size == 0:
+                merged[key] = np.array([], dtype=float)
+            else:
+                merged[key] = np.sort(np.concatenate([toward_arr, away_arr]))
+        return merged
+
+    def analyze_turn_segments(self, poses3d, poses3d_mirrored, turning_metadata, signal_analyzer):
+        """
+        Analyze toward/away segments for original and mirrored tracks,
+        then compute combined average metrics.
+        """
+        #split into toward/away segments based on turning metadata
+        toward_poses, away_poses = self.split_turn_segments(poses3d, turning_metadata)
+        toward_poses_m, away_poses_m = self.split_turn_segments(poses3d_mirrored, turning_metadata)
+
+        # If any segment is too short to be meaningful, fallback to full-track metrics.
+        min_segment_frames = 10
+        if (
+            toward_poses.shape[0] < min_segment_frames
+            or away_poses.shape[0] < min_segment_frames
+            or toward_poses_m.shape[0] < min_segment_frames
+            or away_poses_m.shape[0] < min_segment_frames
+        ):
+            raise ValueError("Toward/Away segment(s) are too short for robust gait analysis.")
+
+        toward_original = self.analyze_track(toward_poses, signal_analyzer)
+        toward_mirrored = self.analyze_track(toward_poses_m, signal_analyzer, is_mirrored=True)
+        away_original = self.analyze_track(away_poses, signal_analyzer)
+        away_mirrored = self.analyze_track(away_poses_m, signal_analyzer, is_mirrored=True)
+
+        toward_avg = self.calculate_average_features(
+            toward_original["results"], toward_mirrored["results"]
+        )
+        away_avg = self.calculate_average_features(
+            away_original["results"], away_mirrored["results"]
+        )
+
+        combined_avg = self.average_feature_dicts(toward_avg, away_avg)
+        if self.height_cm is None:
+            raise ValueError("Missing subject height for gait analysis.")
+        _, _, full_signals = self.calculate_signal(poses3d, self.height_cm * 10)
+
+        away_offset = int(turning_metadata["turn_end_frame"])
+        merged_events_original = self.merge_segment_gait_events(
+            toward_original["gait_event_dic"],
+            away_original["gait_event_dic"],
+            away_offset,
+        )
+        merged_events_mirrored = self.merge_segment_gait_events(
+            toward_mirrored["gait_event_dic"],
+            away_mirrored["gait_event_dic"],
+            away_offset,
+        )
+
+        return {
+            "toward": toward_avg,
+            "away": away_avg,
+            "combined": combined_avg,
+            "signals": full_signals,
+            "gait_event_dic": merged_events_original,
+            "gait_event_dic_mirrored": merged_events_mirrored,
+        }
     
     ### ----- Function for interpolating missing poses -----
     def interpolate_missing_poses(self, poses: np.ndarray, missing_mask: np.ndarray) -> np.ndarray:

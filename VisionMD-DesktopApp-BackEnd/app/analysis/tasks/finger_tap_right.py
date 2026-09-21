@@ -216,6 +216,7 @@ class FingerTapRightTask(BaseTask):
             image = mp.Image(image_format=mp.ImageFormat.SRGB, data=image_data)
             timestamp = int(current_frame_idx / self.video_fps * 1000)
             detection_result = detector.detect_for_video(image, timestamp)
+
             
             # Look for the right hand
             hand_index = -1
