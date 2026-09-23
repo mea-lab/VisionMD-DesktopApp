@@ -103,7 +103,9 @@ def convert_to_cfr(input_path, fps):
         f'{ffmpeg_path}', '-y',
         '-i', input_path,
         '-vf', vf_value,
-        '-vsync', 'cfr',
+        # ``-vsync`` was removed in FFmpeg 9; fps_mode is its supported
+        # per-output replacement and works with the bundled executable.
+        '-fps_mode', 'cfr',
         '-c:v', 'libx264',
         '-pix_fmt', 'yuv420p',
         '-c:a', 'copy',
@@ -529,6 +531,10 @@ def upload_video(request):
         if not fps or fps <= 0:
             raise RuntimeError(f"Invalid FPS detected: {fps}")
 
+        # Capture the source's decoded video frames before any normalization.
+        # This is the invariant that matters; nominal FPS and container
+        # ``nb_frames`` fields are not reliable for VFR phone recordings.
+        source_frame_count, source_duration = probe_decoded_video_timing(saved_video_path)
         convert_to_cfr(saved_video_path, fps)
         convert_to_square_pixels(saved_video_path)
         saved_video_path = add_dummy_audio_if_missing(saved_video_path)
@@ -541,6 +547,12 @@ def upload_video(request):
         cap2.release()
         frame_count, decoded_duration = probe_decoded_video_timing(saved_video_path)
         fps = frame_count / decoded_duration
+        if frame_count != source_frame_count:
+            raise RuntimeError(
+                "Video normalization changed the decoded frame count "
+                f"from {source_frame_count} to {frame_count}. The upload was "
+                "stopped rather than saving an incomplete working video."
+            )
         if not ret or frame is None:
             raise RuntimeError("Failed to read a frame after normalization.")
         if not fps or fps <= 0:
@@ -575,6 +587,8 @@ def upload_video(request):
             "file_type": file_type,
             "fps": fps,
             "frame_count": frame_count,
+            "source_frame_count": source_frame_count,
+            "source_duration": source_duration,
             "thumbnail_url": thumbnail_url,
             "video_url": video_url,
             "rotation": rotation,

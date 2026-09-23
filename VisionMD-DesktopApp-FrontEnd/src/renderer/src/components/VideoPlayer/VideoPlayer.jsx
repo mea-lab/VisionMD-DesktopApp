@@ -32,7 +32,12 @@ const VideoPlayer = ({
   const [currentFrame, setCurrentFrame] = useState(0);
   const [totalFrameCount, setTotalFrameCount] = useState(0);
 
-  const getFrameFromMediaTime = (time, fps) => Math.floor(time * fps + 1e-7)
+  // Follow the presented picture; the playback clock can advance during stalls.
+  const getFrameFromMediaTime = (time, rate) => {
+    const index = Math.max(0, Math.round(time * rate));
+    return frameCount > 0 ? Math.min(frameCount - 1, index) : index;
+  };
+
 
   useEffect(() => {
     if (!isEditing) {
@@ -46,11 +51,9 @@ const VideoPlayer = ({
     let frameCallbackId;
     let cancelled = false;
 
-    const updateFrameNumber = () => {
-      const video = videoRef.current;
-      if (!video) return;
-
-      const frameIdx = getFrameFromMediaTime(video.currentTime, fps);
+    const updateFrameNumber = (_now, metadata) => {
+      if (cancelled) return;
+      const frameIdx = getFrameFromMediaTime(metadata.mediaTime, fps);
       setCurrentFrame(frameIdx);
 
       if (!cancelled) {
@@ -65,7 +68,7 @@ const VideoPlayer = ({
         video.cancelVideoFrameCallback(frameCallbackId);
       }
     };
-  }, [videoRef, fps]);
+  }, [videoRef, videoURL, fps, frameCount]);
 
   // Observe the actual panel rather than only the browser window. Sidebars and
   // task panes can resize without emitting a window resize event.
@@ -222,7 +225,9 @@ const VideoPlayer = ({
                   setIsEditing(false);
                   const newFrame = Math.max(0, Math.min(totalFrameCount - 1, Number(frameInput)));
                   if (!isNaN(newFrame) && videoRef.current) {
-                    videoRef.current.currentTime = newFrame / fps;
+                    // Seek inside the frame: rounded FPS can otherwise put an
+                    // exact-boundary seek a microsecond into the previous frame.
+                    videoRef.current.currentTime = (newFrame + 0.5) / fps;
                     setCurrentFrame(newFrame);
                     setFrameInput(newFrame);
                   }
@@ -251,6 +256,7 @@ const VideoPlayer = ({
             >
               <video
                 src={videoURL}
+                key={videoURL}
                 ref={videoRef}
                 preload="auto"
                 style={{

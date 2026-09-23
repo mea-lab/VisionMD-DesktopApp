@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import { landmarkDisplayColor } from './landmarkColor';
 
 const ResizeHandles = ({ x, y, width, height, onResize, item, index, handleSize = 12.5, strokeThickness }) => {
   const handles = [
@@ -393,15 +394,7 @@ const InteractiveOverlays = ({
             const colors3D = tasks[selectedTask].data.landmark_colors;
             return tasks[selectedTask].data.landMarks[landMarkIndex].map((point, idx) => {
               const [px, py] = point;
-              let fillColor = 'red';
-              if (
-                Array.isArray(colors3D) &&
-                colors3D[landMarkIndex] &&
-                Array.isArray(colors3D[landMarkIndex][idx])
-              ) {
-                const [r, g, b] = colors3D[landMarkIndex][idx];
-                fillColor = `rgb(${r}, ${g}, ${b})`;
-              }
+              const fillColor = landmarkDisplayColor(colors3D, landMarkIndex, idx);
               return (
                 <circle
                   key={`landmark-${idx}`}

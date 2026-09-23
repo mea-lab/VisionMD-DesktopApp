@@ -1,5 +1,6 @@
 // src/components/VideoPlayer/VideoDrawer.jsx
 import React, { useEffect, useRef, useCallback } from 'react';
+import { landmarkDisplayColor } from './landmarkColor';
 
 const VideoDrawer = ({
   videoRef,
@@ -140,12 +141,7 @@ const VideoDrawer = ({
     joints2D.forEach((pt, j) => {
       if (!pt || pt.length < 2) return;
       const [lx, ly] = pt;
-      // A stable golden-angle palette gives every anatomical landmark its own
-      // color and keeps that identity constant throughout playback. Previously
-      // most tasks rendered every point red, making crossings impossible to
-      // follow. Gait's phase colors remain available in the result JSON for QC.
-      const hue = (j * 137.508) % 360;
-      const fill = `hsl(${hue}, 82%, 52%)`;
+      const fill = landmarkDisplayColor(landmark_colors, frameIndex, j);
       ctx.fillStyle = fill;
       ctx.beginPath();
       ctx.arc(lx , ly , radiusPx, 0, 2 * Math.PI);
