@@ -33,12 +33,23 @@ def _run(job_id, task_name, video_id, raw_json, force):
         job = _JOBS[job_id]
         if job["status"] == "cancelled":
             return
-        job.update(status="running", progress=10, startedAt=_now())
+        job.update(status="running", progress=None, message="Starting analysis…", startedAt=_now())
     try:
         url = f"/api/{task_name}/?id={video_id}"
         if force:
             url += "&force=1"
         request = RequestFactory().post(url, {"json_data": raw_json})
+        def report(progress, message=None):
+            with _LOCK:
+                job = _JOBS[job_id]
+                job["progress"] = max(job.get("progress") or 0, min(99, int(progress)))
+                if message:
+                    job["message"] = str(message)
+        def cancelled():
+            with _LOCK:
+                return bool(_JOBS[job_id].get("cancelRequested"))
+        request.analysis_progress = report
+        request.analysis_cancelled = cancelled
         result = execute_task(task_name, request)
         if hasattr(result, "status_code"):
             raise RuntimeError(getattr(result, "data", None) or result.content.decode())
@@ -48,9 +59,10 @@ def _run(job_id, task_name, video_id, raw_json, force):
             )
     except Exception as exc:
         with _LOCK:
-            _JOBS[job_id].update(
-                status="failed", progress=100, error=str(exc), completedAt=_now()
-            )
+            cancelled = _JOBS[job_id].get("cancelRequested")
+            _JOBS[job_id].update(status="cancelled" if cancelled else "failed",
+                progress=100, error=None if cancelled else str(exc), completedAt=_now(),
+                message="Analysis cancelled" if cancelled else "Analysis failed")
 
 
 @api_view(["POST"])
@@ -88,8 +100,9 @@ def analysis_job(request, job_id):
                 job.update(status="cancelled", progress=100, completedAt=_now())
             elif job["status"] == "running":
                 job["cancelRequested"] = True
+                job["message"] = "Cancelling after the current inference batch…"
                 return JsonResponse(
-                    {**_public(job), "message": "Running GPU inference cannot be interrupted safely."},
+                    _public(job),
                     status=202,
                 )
         return JsonResponse(_public(job))

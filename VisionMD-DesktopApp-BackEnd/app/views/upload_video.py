@@ -503,6 +503,7 @@ def upload_video(request):
         cap2 = cv2.VideoCapture(saved_video_path)
         ret, frame = cap2.read()
         fps = cap2.get(cv2.CAP_PROP_FPS)
+        frame_count = int(cap2.get(cv2.CAP_PROP_FRAME_COUNT))
         cap2.release()
         if not ret or frame is None:
             raise RuntimeError("Failed to read a frame after normalization.")
@@ -537,6 +538,7 @@ def upload_video(request):
             "stem_name": stem_name,
             "file_type": file_type,
             "fps": fps,
+            "frame_count": frame_count,
             "thumbnail_url": thumbnail_url,
             "video_url": video_url,
             "rotation": rotation,

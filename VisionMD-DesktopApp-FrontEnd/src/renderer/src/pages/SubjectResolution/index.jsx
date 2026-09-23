@@ -21,6 +21,7 @@ const SubjectResolution = () => {
     boundingBoxes,
     setBoundingBoxes,
     fps,
+    frameCount,
     setFPS,
     persons,
     setPersons,
@@ -51,6 +52,7 @@ const SubjectResolution = () => {
             boundingBoxes={boundingBoxes}
             setBoundingBoxes={setBoundingBoxes}
             fps={fps}
+            frameCount={frameCount}
             persons={persons}
             setVideoReady={setVideoReady}
             videoURL={videoURL}

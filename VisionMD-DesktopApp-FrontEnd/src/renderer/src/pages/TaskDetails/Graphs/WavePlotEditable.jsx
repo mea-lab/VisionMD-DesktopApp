@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import Plot from 'react-plotly.js';
 import Button from '@mui/material/Button';
 import AnalysisRangePanel from '../AnalysisRangePanel';
+import { useTheme } from '../../../contexts/ThemeContext';
 
 const WavePlotEditable = ({
   selectedTaskIndex,
@@ -12,6 +13,8 @@ const WavePlotEditable = ({
   endTime,
   handleJSONUpload,
 }) => {
+  const { theme } = useTheme();
+  const light = theme === 'light';
   const [currentData, setCurrentData] = useState(tasks?.[selectedTaskIndex]?.data);
 
   useEffect(() => {
@@ -627,18 +630,18 @@ const WavePlotEditable = ({
             },
           }}
           layout={{
-            plot_bgcolor: '#39393F',
-            paper_bgcolor: '#333338',
+            plot_bgcolor: light ? '#ffffff' : '#39393F',
+            paper_bgcolor: light ? '#ffffff' : '#333338',
             shapes,
             dragmode: 'pan',
             xaxis: {
               title: {
                 text: 'Time [s]',
                 standoff: 20,
-                font: { color: '#f6f3f3ff' },
+                font: { color: light ? '#18181b' : '#f6f3f3ff' },
               },
-              gridcolor: '#3F3F46',
-              tickfont: { color: '#f3f4f6' },
+              gridcolor: light ? '#d4d4d8' : '#3F3F46',
+              tickfont: { color: light ? '#27272a' : '#f3f4f6' },
               range: [startTime, endTime],
               fixedrange: false,
             },
@@ -646,10 +649,10 @@ const WavePlotEditable = ({
               title: {
                 text: 'Distance',
                 standoff: 20,
-                font: { color: '#f3f4f6' },
+                font: { color: light ? '#18181b' : '#f3f4f6' },
               },
-              gridcolor: '#3F3F46',
-              tickfont: { color: '#f3f4f6' },
+              gridcolor: light ? '#d4d4d8' : '#3F3F46',
+              tickfont: { color: light ? '#27272a' : '#f3f4f6' },
               automargin: true,
               fixedrange: false,
             },
@@ -660,9 +663,9 @@ const WavePlotEditable = ({
               y: 1,
               xanchor: 'right',
               yanchor: 'top',
-              bgcolor: 'rgba(51, 51, 56, 0.8)',
+              bgcolor: light ? 'rgba(255,255,255,0.9)' : 'rgba(51, 51, 56, 0.8)',
               font: {
-                color: '#f3f4f6',
+                color: light ? '#18181b' : '#f3f4f6',
                 size: 12,
                 family: 'Arial, sans-serif',
               },

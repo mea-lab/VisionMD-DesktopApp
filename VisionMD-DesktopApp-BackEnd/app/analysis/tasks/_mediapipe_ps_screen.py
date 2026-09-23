@@ -28,7 +28,8 @@ def _interpolate_track(values: np.ndarray) -> np.ndarray:
 
 def screen_mediapipe_world_landmarks(video_path, rotation, start_frame, end_frame,
                                      fps, subject_box, requested_right,
-                                     process_landmarks):
+                                     process_landmarks, progress=None,
+                                     cancelled=None):
     """Return a provisional track dict, or a rejected diagnostic dict."""
     x1 = max(0, int(subject_box["x"])); y1 = max(0, int(subject_box["y"]))
     x2 = x1 + max(1, int(subject_box["width"])); y2 = y1 + max(1, int(subject_box["height"]))
@@ -40,6 +41,10 @@ def screen_mediapipe_world_landmarks(video_path, rotation, start_frame, end_fram
     detected = 0
     try:
         for local_index in range(expected):
+            if cancelled and cancelled():
+                raise RuntimeError("Analysis cancelled")
+            if progress and (local_index % max(1, expected // 20) == 0):
+                progress(local_index / max(1, expected))
             ok, frame = cap.read()
             if not ok: break
             from app.analysis.tasks.base_task import BaseTask

@@ -10,6 +10,7 @@ import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
 import { VideoContext } from '../../contexts/VideoContext';
 import { cancelAnalysisJob, runAnalysisJob } from '../../utils/analysisJobs';
+import { useTheme } from '../../contexts/ThemeContext';
 export default function JSONUploadDialog({
   dialogOpen,
   setDialogOpen,
@@ -28,10 +29,13 @@ export default function JSONUploadDialog({
   const [jsonContent, setJSONContent] = useState(null);
   const [serverProcessing, setServerProcessing] = useState(false);
   const [analysisJob, setAnalysisJob] = useState(null);
+  const { theme } = useTheme();
 
   const handleClose = async () => {
     if (analysisJob?.id && ['queued', 'running'].includes(analysisJob.status)) {
-      await cancelAnalysisJob(analysisJob.id);
+      const cancelled = await cancelAnalysisJob(analysisJob.id);
+      if (cancelled) setAnalysisJob(cancelled);
+      return;
     }
     setDialogOpen(false);
     setFileError('');
@@ -116,7 +120,8 @@ export default function JSONUploadDialog({
     } catch (error) {
       setServerProcessing(false);
       console.error('Failed to fetch projects:', error);
-      setFileError(error.message || 'Unknown error');
+      setFileError(error.message === 'Analysis cancelled'
+        ? 'Analysis cancelled.' : (error.message || 'Unknown error'));
     }
   };
 
@@ -126,7 +131,8 @@ export default function JSONUploadDialog({
         onClose={handleClose}
         PaperProps={{
           sx: {
-            backgroundColor: '#333338',
+            backgroundColor: theme === 'light' ? '#ffffff' : '#333338',
+            color: theme === 'light' ? '#18181b' : '#f4f4f5',
             borderRadius: 3,
             minWidth: 400,
           },
@@ -180,11 +186,18 @@ export default function JSONUploadDialog({
                 className='flex flex-col w-full h-full justify-center items-center gap-10 text-gray-100'
               >
                 <div>
-                  {analysisJob?.status === 'queued'
+                  {analysisJob?.message || (analysisJob?.status === 'queued'
                     ? 'Analysis queued'
-                    : `Server processing the request (${analysisJob?.progress ?? 10}%)`}
+                    : 'Server processing the request')}
+                  {Number.isFinite(analysisJob?.progress) ? ` (${analysisJob.progress}%)` : ''}
                 </div>
                 <CircularProgress className='my-4' size={80} />
+                <button
+                  className='rounded-md border border-red-500 px-3 py-1 text-red-500 hover:bg-red-50'
+                  onClick={handleClose}
+                >
+                  {analysisJob?.cancelRequested ? 'Cancelling…' : 'Cancel analysis'}
+                </button>
               </div>
             )}
         </DialogContent>

@@ -100,6 +100,7 @@ class HandPronationSupinationTask(BaseTask):
         self.task_start_frame_idx=self.task_end_frame_idx=None; self.original_bounding_box=None
         self.enlarged_bounding_box=self.subject_bounding_boxes=None; self._angles=None; self._pipeline={}
         self.ps_method="auto"
+        self._progress=lambda *_args,**_kwargs:None; self._cancelled=lambda:False
 
     def api_response(self,request):
         try:
@@ -114,6 +115,9 @@ class HandPronationSupinationTask(BaseTask):
         except Exception as exc: return Response(str(exc),status=500)
 
     def prepare_video_parameters(self,request):
+        self._progress=getattr(request,"analysis_progress",self._progress)
+        self._cancelled=getattr(request,"analysis_cancelled",self._cancelled)
+        self._progress(3,"Preparing P/S analysis")
         self.video_id=request.GET.get("id"); payload=json.loads(request.POST["json_data"])
         folder=os.path.join(settings.MEDIA_ROOT,"video_uploads",self.video_id)
         with open(os.path.join(folder,"metadata.json"),encoding="utf-8") as h: meta=json.load(h)["metadata"]
@@ -135,6 +139,7 @@ class HandPronationSupinationTask(BaseTask):
         count=self.task_end_frame_idx-self.task_start_frame_idx; step=max(1,round(self.video_fps/12.)); samples={}; cls=1 if self.HAND_LABEL=="Right" else 0
         width = height = None
         for i in range(count):
+            if self._cancelled(): raise RuntimeError("Analysis cancelled")
             ok,frame=cap.read()
             if not ok: break
             if i%step: continue
@@ -149,6 +154,7 @@ class HandPronationSupinationTask(BaseTask):
             result=model.predict(crop,device=_device(),conf=.05,classes=[cls],verbose=False)[0]
             if result.boxes is not None and len(result.boxes):
                 boxes=result.boxes.xyxy.cpu().numpy().astype(float); boxes[:,[0,2]]+=px1; boxes[:,[1,3]]+=py1; samples[i]=list(boxes)
+            if i%max(1,count//20)==0: self._progress(32+16*i/max(1,count),"YOLO hand localization")
         cap.release()
         track=select_moving_track_timed(samples)
         timed=np.array([i for i,_ in track]); boxes=np.array([x for _,x in track]); ids=np.arange(count)
@@ -162,8 +168,11 @@ class HandPronationSupinationTask(BaseTask):
         def flush():
             nonlocal pending,start
             if not pending:return
+            if self._cancelled(): raise RuntimeError("Analysis cancelled")
             indices=range(start,start+len(pending)); a,b=wilor.infer_rois_with_projection(pending,[rois[i] for i in indices],self.HAND_LABEL=="Right"); raw.append(a); projected.append(b); start+=len(pending); pending=[]
+            self._progress(55+25*start/max(1,count),"WiLoR 3-D hand pose inference")
         for _ in range(count):
+            if self._cancelled(): raise RuntimeError("Analysis cancelled")
             ok,frame=cap.read()
             if not ok:break
             pending.append(BaseTask.correct_frame_orientation(frame,self.video_rotation))
@@ -176,14 +185,18 @@ class HandPronationSupinationTask(BaseTask):
     def extract_landmarks(self):
         total_started=time.perf_counter(); screening=None
         if self.ps_method != "wilor":
+            self._progress(5,"Trying fast MediaPipe 3-D hand tracking")
             screening_started=time.perf_counter()
             screening=screen_mediapipe_world_landmarks(
                 self.video_file_path,self.video_rotation,self.task_start_frame_idx,
                 self.task_end_frame_idx,self.video_fps,self.original_bounding_box,
                 self.HAND_LABEL=="Right",
-                lambda raw:_process(raw,self.video_fps,self.HAND_LABEL=="Right"))
+                lambda raw:_process(raw,self.video_fps,self.HAND_LABEL=="Right"),
+                progress=lambda fraction:self._progress(5+25*fraction,"Trying fast MediaPipe 3-D hand tracking"),
+                cancelled=self._cancelled)
             screening["seconds"]=round(time.perf_counter()-screening_started,3)
             if screening["accepted"]:
+                self._progress(96,"MediaPipe passed screening; finalizing provisional result")
                 final=screening["final"]; initial=float(np.median(final[:max(1,round(.5*self.video_fps))]))
                 self._angles=(final-initial).tolist()
                 self._pipeline={"version":"mediapipe-screen-wilor-fallback-v1",
@@ -195,13 +208,20 @@ class HandPronationSupinationTask(BaseTask):
                               "mediapipe_screen_seconds":screening["seconds"]}}
                 return self._format_output(screening["corrected"],screening["projected"])
 
+            reason="; ".join(screening.get("reasons") or ["quality gate failed"])
+            self._progress(31,f"MediaPipe was not reliable ({reason}). Switching to YOLO + WiLoR")
+
+        if self._cancelled(): raise RuntimeError("Analysis cancelled")
+        self._progress(32,"Loading YOLO + WiLoR models")
         localization_started=time.perf_counter(); hand,wilor=_models(); fixed,dynamic,ratio,count,coverage=self._localize(hand); localization_seconds=time.perf_counter()-localization_started; direct_dynamic=ratio>1.7
         inference_started=time.perf_counter()
         rois=dynamic if direct_dynamic else np.repeat(fixed[None,:],count,axis=0); raw,projected=self._infer(wilor,rois,count)
         initial_inference_seconds=time.perf_counter()-inference_started
+        self._progress(82,"Checking landmark continuity and angle quality")
         final,corrected,diag,quality=_process(raw,self.video_fps,self.HAND_LABEL=="Right"); rerun=not direct_dynamic and not quality["pass"]
         rerun_seconds=0.
         if rerun:
+            self._progress(84,"Fixed ROI failed quality checks; retrying with dynamic ROIs")
             rerun_started=time.perf_counter(); rois=dynamic; raw,projected=self._infer(wilor,rois,count); final,corrected,diag,quality=_process(raw,self.video_fps,self.HAND_LABEL=="Right"); rerun_seconds=time.perf_counter()-rerun_started
         initial=float(np.median(final[:max(1,round(.5*self.video_fps))]))
         relative=final-initial
@@ -218,6 +238,7 @@ class HandPronationSupinationTask(BaseTask):
                           "rejection_reasons":["refiner_error"],
                           "error":f"{type(exc).__name__}: {exc}"}
         self._angles=relative.tolist()
+        self._progress(98,"Finalizing P/S signal")
         self._pipeline={"version":"mediapipe-screen-wilor-fallback-v1","engine":"yolo_wilor","requires_verification":not quality["pass"],"roi_mode":"dynamic" if direct_dynamic or rerun else "fixed","dynamic_rerun":rerun,"fixed_to_typical_crop_ratio":ratio,"localization_fps":12.,"track_coverage":coverage,"quality":quality,"temporal_refiner":temporal,"hand_detector":_hand_model_path(),"screening":{key:value for key,value in screening.items() if key not in {"raw","projected","corrected","final","diagnostics"}} if screening else {"skipped":True,"reason":"WiLoR explicitly requested"},"timing":{"localization_seconds":round(localization_seconds,3),"initial_wilor_seconds":round(initial_inference_seconds,3),"dynamic_rerun_seconds":round(rerun_seconds,3),"total_seconds":round(time.perf_counter()-total_started,3)}}
         return self._format_output(corrected,projected)
 

@@ -168,9 +168,10 @@ const VideoDrawer = ({
       lastDrawnFrame.current = frameNumber;
       currentFrame.current = frameNumber;
 
-      // Clear canvas and draw the current video frame as background.
+      // The native video element renders the pixels. This canvas is only an
+      // overlay; copying video frames through canvas caused stale/frozen frames
+      // in Chromium for some valid H.264 files.
       clearCanvas();
-      drawVideoFrame();
 
       // Check if currentTime is within any taskBox's time window.
       const inTaskTime = tasks.some((task) => currentTime >= task.start && currentTime <= task.end);
@@ -191,7 +192,7 @@ const VideoDrawer = ({
         drawLandMarks(scaleRatio, currentTime);
       }
     },
-    [getFrameNumber, clearCanvas, drawVideoFrame, drawBoundingBoxes, drawLandMarks, landmark_colors, tasks, screen, isPlaying, zoomLevel]
+    [getFrameNumber, clearCanvas, drawBoundingBoxes, drawLandMarks, landmark_colors, tasks, screen, isPlaying, zoomLevel]
   );
 
   // Set canvas dimensions and start the continuous render loop.

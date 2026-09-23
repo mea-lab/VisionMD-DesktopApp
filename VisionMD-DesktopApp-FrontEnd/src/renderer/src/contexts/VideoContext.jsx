@@ -16,6 +16,7 @@ export const VideoProvider = ({ children }) => {
     const [videoURL, setVideoURL] = useState("");
     const [fileName, setFileName] = useState("");
     const [fps, setFPS] = useState(null);
+    const [frameCount, setFrameCount] = useState(null);
 
     const [persons, setPersons] = useState([]);
     const [boundingBoxes, setBoundingBoxes] = useState([]);
@@ -72,6 +73,7 @@ export const VideoProvider = ({ children }) => {
                 setVideoURL(`${BASE_URL}${metadata.video_url}${separator}v=${mediaVersion}`);
                 setFileName(metadata.video_name);
                 setFPS(metadata.fps);
+                setFrameCount(metadata.frame_count ?? null);
 
                 // Setting potential data that was stored previously (bounding boxes, tasks, landmarks, signals)
                 if (data.persons) {
@@ -99,6 +101,7 @@ export const VideoProvider = ({ children }) => {
         setVideoURL("");
         setFileName("");
         setFPS(null);
+        setFrameCount(null);
         setPersons([]);
         setBoundingBoxes([]);
         setTasks([]);
@@ -133,6 +136,8 @@ export const VideoProvider = ({ children }) => {
                 setFileName,
                 fps,
                 setFPS,
+                frameCount,
+                setFrameCount,
                 boundingBoxes,
                 setBoundingBoxes,
                 tasks,

@@ -18,7 +18,7 @@ const TaskSelection = () => {
     videoURL, setVideoURL,
     fileName, setFileName,
     boundingBoxes, setBoundingBoxes,
-    fps, setFPS,
+    fps, setFPS, frameCount,
     tasks, setTasks, 
     tasksReady, setTasksReady,
     taskTypeData, setTaskTypeData
@@ -111,6 +111,7 @@ const TaskSelection = () => {
             videoRef={videoRef}
             boundingBoxes={boundingBoxes}
             fps={fps}
+            frameCount={frameCount}
             persons={persons}
             setVideoReady={setVideoReady}
             setVideoData={setVideoData}

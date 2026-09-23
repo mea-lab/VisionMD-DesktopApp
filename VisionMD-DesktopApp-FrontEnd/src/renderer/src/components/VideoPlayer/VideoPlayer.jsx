@@ -9,6 +9,7 @@ const VideoPlayer = ({
   videoURL,
   videoRef,
   fps,
+  frameCount,
   boundingBoxes,
   persons,
   setVideoReady,
@@ -122,13 +123,21 @@ const VideoPlayer = ({
   }, [selectedTask, videoRef]);
 
   const captureTotalFrameCount = () => {
+    if (Number.isFinite(frameCount) && frameCount > 0) {
+      setTotalFrameCount(frameCount);
+      return;
+    }
     const duration = videoRef.current?.duration;
     if (Number.isFinite(duration) && Number.isFinite(fps)) {
       // Capture once when the browser reads video metadata.  Do not derive
       // this during every render from a duration that media helpers can alter.
-      setTotalFrameCount(Math.ceil(duration * fps - 1e-6));
+      setTotalFrameCount(Math.round(duration * fps));
     }
   };
+
+  useEffect(() => {
+    if (Number.isFinite(frameCount) && frameCount > 0) setTotalFrameCount(frameCount);
+  }, [frameCount]);
 
   // Pointer events for panning.
   const handlePointerDown = (e) => {
@@ -211,10 +220,11 @@ const VideoPlayer = ({
                 onFocus={() => setIsEditing(true)}
                 onBlur={() => {
                   setIsEditing(false);
-                  const newFrame = Number(frameInput);
+                  const newFrame = Math.max(0, Math.min(totalFrameCount - 1, Number(frameInput)));
                   if (!isNaN(newFrame) && videoRef.current) {
                     videoRef.current.currentTime = newFrame / fps;
-                    setCurrentFrame(Math.floor(videoRef.current.currentTime * fps + 1e-7));
+                    setCurrentFrame(newFrame);
+                    setFrameInput(newFrame);
                   }
                 }}
                 onKeyDown={(e) => {
@@ -247,7 +257,9 @@ const VideoPlayer = ({
                   objectFit: 'contain',
                   width: '100%',
                   height: '100%',
-                  opacity: 0, //VIDEO ELEMENT NEEDS TO BE HIDDEN AS IT BUFFERS, VIDEO DRAWER WILL DRAW THE VIDEO FRAMES
+                  opacity: 1,
+                  transform: `scale(${zoomLevel}) translate(${panOffset.x / zoomLevel}px, ${panOffset.y / zoomLevel}px)`,
+                  transformOrigin: 'center center',
                 }}
                 onLoadedMetadata={() => {
                   setVideoReady(true);

@@ -8,8 +8,15 @@
 - Analysis uploads contain parameters only; videos stay in the project store
   and are no longer copied through the renderer for each request.
 - Auto Process and Analyze All use the background job API. The UI distinguishes
-  queued and running work. A queued job can be cancelled; a running GPU kernel
-  is allowed to finish because forcibly killing it can invalidate CUDA state.
+  queued and running work. P/S reports real stage/frame progress and responds to
+  cancellation between frames or WiLoR batches. The active CUDA kernel is
+  allowed to finish before cancellation is acknowledged, avoiding invalid CUDA
+  state. Tasks without instrumented progress use an indeterminate spinner rather
+  than a misleading fixed percentage.
+- The native Chromium video element renders video pixels; canvases are now
+  transparent overlays only. Exact decoded frame counts come from OpenCV-backed
+  project metadata instead of `duration * fps`, avoiding stale canvas frames and
+  off-by-one or unclamped frame display.
 
 ## Backend
 

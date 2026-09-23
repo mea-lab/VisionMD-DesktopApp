@@ -35,6 +35,7 @@ const TaskDetails = () => {
     boundingBoxes,
     setBoundingBoxes,
     fps,
+    frameCount,
     tasks,
     setTasks,
     persons,
@@ -273,6 +274,7 @@ const TaskDetails = () => {
             boundingBoxes={boundingBoxes}
             setBoundingBoxes={setBoundingBoxes}
             fps={fps}
+            frameCount={frameCount}
             persons={persons}
             setVideoReady={setVideoReady}
             setVideoData={setVideoData}
@@ -372,6 +374,16 @@ const TaskDetails = () => {
             </button>
           </div>
 
+          {currentTask?.data?.psPipeline?.engine === 'yolo_wilor'
+            && currentTask?.data?.psPipeline?.screening?.accepted === false && (
+            <div className="mx-10 mb-3 rounded-md border border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              MediaPipe screening was not reliable for this video. VisionMD automatically
+              completed the analysis with YOLO + WiLoR.
+              {currentTask.data.psPipeline.screening.reasons?.length > 0
+                ? ` Reason: ${currentTask.data.psPipeline.screening.reasons.join('; ')}` : ''}
+            </div>
+          )}
+
           <div className="flex-1 py-4 px-10 overflow-y-auto text-gray-100">
             {currentTaskError ? (
               <div className="flex justify-center items-center h-full flex-col gap-4">
@@ -412,7 +424,9 @@ const TaskDetails = () => {
                 <div>
                   {analysisJobs[currentTaskId]?.status === 'queued'
                     ? 'Analysis queued…'
-                    : `Analyzing task… ${analysisJobs[currentTaskId]?.progress ?? 10}%`}
+                    : (Number.isFinite(analysisJobs[currentTaskId]?.progress)
+                      ? `Analyzing task… ${analysisJobs[currentTaskId].progress}%`
+                      : 'Analyzing task…')}
                 </div>
                 <CircularProgress size={64} sx={{ color: '#2563eb' }} />
               </div>
