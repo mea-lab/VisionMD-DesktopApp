@@ -11,10 +11,13 @@ import Input from '@mui/material/Input';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
+import { useTheme } from '../../contexts/ThemeContext';
 
 import { VideoContext } from '@/contexts/VideoContext';
 
 export default function JSONUploadDialog({ dialogOpen, setDialogOpen, handleJSONUpload }) {
+  const { theme } = useTheme();
+  const isLight = theme === 'light';
   const [fileName, setFileName] = useState('');
   const [fileError, setFileError] = useState('');
   const [jsonContent, setJSONContent] = useState(null);
@@ -141,7 +144,8 @@ export default function JSONUploadDialog({ dialogOpen, setDialogOpen, handleJSON
       onClose={handleClose}
       PaperProps={{
         sx: {
-          backgroundColor: '#333338',
+          backgroundColor: isLight ? '#ffffff' : '#333338',
+          color: isLight ? '#18181b' : '#f4f4f5',
           borderRadius: 3,
           minWidth: 400,
         },

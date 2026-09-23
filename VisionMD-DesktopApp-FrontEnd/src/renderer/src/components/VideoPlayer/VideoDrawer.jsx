@@ -133,8 +133,6 @@ const VideoDrawer = ({
     ) return;
 
     const joints2D = landMarks[frameIndex];
-    const colors3D = landmark_colors;
-
     // pre‐compute the crop offset
     if (canvas.width === 0 || canvas.height === 0) return;
     const radiusPx = 5 / scaleRatio
@@ -142,15 +140,12 @@ const VideoDrawer = ({
     joints2D.forEach((pt, j) => {
       if (!pt || pt.length < 2) return;
       const [lx, ly] = pt;
-      let fill = 'red';
-      if (
-        Array.isArray(colors3D) &&
-        colors3D[frameIndex] &&
-        Array.isArray(colors3D[frameIndex][j])
-      ) {
-        const [r, g, b] = colors3D[frameIndex][j];
-        fill = `rgb(${r}, ${g}, ${b})`;
-      }
+      // A stable golden-angle palette gives every anatomical landmark its own
+      // color and keeps that identity constant throughout playback. Previously
+      // most tasks rendered every point red, making crossings impossible to
+      // follow. Gait's phase colors remain available in the result JSON for QC.
+      const hue = (j * 137.508) % 360;
+      const fill = `hsl(${hue}, 82%, 52%)`;
       ctx.fillStyle = fill;
       ctx.beginPath();
       ctx.arc(lx , ly , radiusPx, 0, 2 * Math.PI);

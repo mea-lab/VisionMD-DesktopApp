@@ -22,9 +22,40 @@ def get_ffmpeg_path():
             raise FileNotFoundError("ffmpeg not found in PATH")
         return ffmpeg_path
 
+def get_ffprobe_path():
+    """Return the ffprobe paired with VisionMD's ffmpeg binary."""
+    ffmpeg_path = get_ffmpeg_path()
+    return os.path.join(os.path.dirname(ffmpeg_path), "ffprobe")
+
+def probe_decoded_video_timing(input_path):
+    """Count decoded frames and obtain their presentation duration.
+
+    Container ``nb_frames`` and OpenCV's nominal FPS are frequently wrong for
+    phone VFR recordings. ``-count_frames`` asks the decoder for the quantity
+    VisionMD actually needs and lets CFR normalization preserve every frame.
+    """
+    cmd = [
+        get_ffprobe_path(), "-v", "error", "-count_frames",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=nb_read_frames,duration:format=duration",
+        "-of", "json", input_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFprobe frame count failed:\n{result.stderr}")
+    data = json.loads(result.stdout)
+    if not data.get("streams"):
+        raise RuntimeError("FFprobe frame count returned no video stream.")
+    stream = data["streams"][0]
+    frame_count = int(stream.get("nb_read_frames") or 0)
+    duration = float(stream.get("duration") or data.get("format", {}).get("duration") or 0)
+    if frame_count < 1 or duration <= 0:
+        raise RuntimeError("FFprobe could not determine decoded frame timing.")
+    return frame_count, duration
+
 def is_vfr(input_path):
     ffmpeg_path = get_ffmpeg_path()
-    ffmprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
+    ffmprobe_path = get_ffprobe_path()
     print(f"Chosen ffmpeg binary path for ffmprobing video: {ffmprobe_path}")
     cmd = [
         ffmprobe_path,
@@ -60,7 +91,12 @@ def convert_to_cfr(input_path, fps):
     output_path = f"{base}_cfr{ext}"
     print(f"Chosen ffmpeg binary path for VFR to CFR conversion: {ffmpeg_path}")
 
-    vf_parts = [f"fps={fps}"]
+    # Preserve the source's decoded frame count. OpenCV often reports a nominal
+    # 29.97 FPS for VFR phone video even when the presentation timestamps imply
+    # a different effective rate; forcing that nominal value drops frames.
+    source_frame_count, source_duration = probe_decoded_video_timing(input_path)
+    fps = source_frame_count / source_duration
+    vf_parts = [f"fps={fps:.12f}"]
     vf_value = ",".join(vf_parts)
 
     cmd = [
@@ -90,7 +126,7 @@ def convert_to_cfr(input_path, fps):
 def convert_to_square_pixels(input_path):
     print("Running conversion to square pixels...")
     ffmpeg_path = get_ffmpeg_path()
-    ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
+    ffprobe_path = get_ffprobe_path()
     cmd = [
         ffprobe_path,
         "-v", "error",
@@ -180,7 +216,7 @@ def convert_to_square_pixels(input_path):
 def convert_to_h264_aac(input_path):
     print("Running conversion to h264 aac encoding...")
     ffmpeg_path = get_ffmpeg_path()
-    ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
+    ffprobe_path = get_ffprobe_path()
 
     probe_cmd = [
         ffprobe_path,
@@ -273,7 +309,7 @@ def convert_to_mp4(input_path):
     print("Running conversion to mp4...")
 
     ffmpeg_path = get_ffmpeg_path()
-    ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
+    ffprobe_path = get_ffprobe_path()
 
     if not os.path.exists(input_path):
         raise RuntimeError(f"Input video file does not exist: {input_path}")
@@ -362,7 +398,7 @@ def convert_to_mp4(input_path):
 
 def add_dummy_audio_if_missing(video_path):
     ffmpeg_path = get_ffmpeg_path()
-    ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
+    ffprobe_path = get_ffprobe_path()
 
     probe_cmd = [
         ffprobe_path,
@@ -502,9 +538,9 @@ def upload_video(request):
         file_type = os.path.splitext(original_filename)[1].lstrip('.')
         cap2 = cv2.VideoCapture(saved_video_path)
         ret, frame = cap2.read()
-        fps = cap2.get(cv2.CAP_PROP_FPS)
-        frame_count = int(cap2.get(cv2.CAP_PROP_FRAME_COUNT))
         cap2.release()
+        frame_count, decoded_duration = probe_decoded_video_timing(saved_video_path)
+        fps = frame_count / decoded_duration
         if not ret or frame is None:
             raise RuntimeError("Failed to read a frame after normalization.")
         if not fps or fps <= 0:

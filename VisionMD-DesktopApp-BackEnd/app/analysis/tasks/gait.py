@@ -72,6 +72,13 @@ class GaitTask(BaseTask):
             self.original_bounding_box = None
             self.enlarged_bounding_box = None
             self.subject_bounding_boxes = None
+            self._progress = lambda progress, message=None: None
+            self._cancelled = lambda: False
+
+    def _check_cancelled(self):
+        """Stop promptly at safe boundaries between GPU inference calls."""
+        if self._cancelled():
+            raise RuntimeError("Analysis cancelled")
 
 
     def api_response(self, request):
@@ -83,15 +90,22 @@ class GaitTask(BaseTask):
             self.prepare_video_parameters(request)
 
             # 2) Getting detector and using detector to get landmarks
+            self._progress(3, "Loading the gait pose model…")
+            self._check_cancelled()
             detector = self.get_detector()
+            self._progress(5, "Estimating 3D gait landmarks…")
             landmarks, landmarks_mirrored = self.extract_landmarks(detector)
 
             # 2) Getting signals
+            self._check_cancelled()
+            self._progress(78, "Estimating gait phases…")
             phases, strides, signals = self.calculate_signal(landmarks['poses3d'], self.height_cm * 10)
             phases_mirrored, strides_mirrored, signals_mirrored = self.calculate_signal(landmarks_mirrored['poses3d'], self.height_cm * 10)
 
             # 3) Analyze straight walking.  When a turn is present, exclude the
             # turn itself and pool the individual steps from both directions.
+            self._check_cancelled()
+            self._progress(90, "Calculating gait measures…")
             signal_analyzer = self.get_signal_analyzer()
             # Use the anatomical labels exactly as MeTRAbs produced them for
             # orientation.  The continuity-based left/right correction used by
@@ -153,6 +167,7 @@ class GaitTask(BaseTask):
                 'strides_mirrored': strides_mirrored.tolist(),
             }
         except Exception as e:
+            traceback.print_exc()
             return Response(f"Error with gait analysis: {str(e)}", status=500)
         finally:
             # 5) Clean up memory
@@ -411,6 +426,10 @@ class GaitTask(BaseTask):
             json_data = json.loads(json_raw)
         except json.JSONDecodeError:
             raise Exception("Invalid JSON in 'json_data'")
+
+        self._progress = getattr(request, "analysis_progress", self._progress)
+        self._cancelled = getattr(request, "analysis_cancelled", self._cancelled)
+        self._check_cancelled()
         
         folder_path = os.path.join(settings.MEDIA_ROOT, "video_uploads", video_id)
         if not os.path.isdir(folder_path):
@@ -665,12 +684,17 @@ class GaitTask(BaseTask):
         cap.release()
 
         # Set up video reader
-        batch_size = 16
+        # Eight frames keeps GPU utilization high while bounding cancellation
+        # latency. Cancellation is also checked between normal and mirrored
+        # passes, so a request never waits for an unnecessary second inference.
+        batch_size = 8
         vid = self.video_reader(file_path, batch_size, start_frame, end_frame)
         raw_frame_idx = start_frame
+        total_frames = max(1, end_frame - start_frame + 1)
 
         # Iterate over every frame batch
         for frame_batch in tqdm(vid, desc=f"Processing {file_name}"):
+            self._check_cancelled()
             # --- Prepare tensors for BOTH original and mirrored batches ---
             batch_np = frame_batch
             device = GaitTask._metrabs_detector.device
@@ -733,6 +757,7 @@ class GaitTask(BaseTask):
                     **scalar_camera_args,
                     **matrix_camera_args,
                 )
+                self._check_cancelled()
                 pred_mirr = GaitTask._metrabs_detector.estimate_poses_batched(
                     images=batch_tensor_mirr,
                     boxes=boxes_mirrored,
@@ -766,6 +791,11 @@ class GaitTask(BaseTask):
                     poses3d_lists_mirr.append(np.full([17,3], np.nan, np.float32))
 
             del pred, pred_mirr, batch_tensor, batch_tensor_mirr
+            completed = min(total_frames, raw_frame_idx - start_frame)
+            self._progress(
+                5 + int(70 * completed / total_frames),
+                f"Estimating 3D gait landmarks ({completed}/{total_frames} frames)…",
+            )
 
         # --- Post‐processing for ORIGINAL ---
         all_poses2d = np.stack(poses2d_lists, axis=0)

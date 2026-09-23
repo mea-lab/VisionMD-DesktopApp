@@ -604,7 +604,10 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
             return float(values.mean())
 
         def sample_standard_deviation(name):
-            return self._sample_standard_deviation(combine(name))
+            # This method is static: there is deliberately no analyzer instance
+            # here.  Calling through the class also makes pooled cached results
+            # usable without constructing a second analyzer.
+            return GaitSignalAnalyzer._sample_standard_deviation(combine(name))
 
         left_stance, right_stance = combine("stance_left"), combine("stance_right")
         left_swing, right_swing = combine("swing_left"), combine("swing_right")
