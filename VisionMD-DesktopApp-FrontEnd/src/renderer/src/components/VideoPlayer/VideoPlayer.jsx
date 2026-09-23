@@ -29,6 +29,7 @@ const VideoPlayer = ({
   const [frameInput, setFrameInput] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
   const [currentFrame, setCurrentFrame] = useState(0);
+  const [totalFrameCount, setTotalFrameCount] = useState(0);
 
   const getFrameFromMediaTime = (time, fps) => Math.floor(time * fps + 1e-7)
 
@@ -42,6 +43,7 @@ const VideoPlayer = ({
     const video = videoRef.current;
     if (!video) return;
     let frameCallbackId;
+    let cancelled = false;
 
     const updateFrameNumber = () => {
       const video = videoRef.current;
@@ -50,13 +52,22 @@ const VideoPlayer = ({
       const frameIdx = getFrameFromMediaTime(video.currentTime, fps);
       setCurrentFrame(frameIdx);
 
-      video.requestVideoFrameCallback(updateFrameNumber);
+      if (!cancelled) {
+        frameCallbackId = video.requestVideoFrameCallback(updateFrameNumber);
+      }
     };
 
     frameCallbackId = video.requestVideoFrameCallback(updateFrameNumber);
+    return () => {
+      cancelled = true;
+      if (frameCallbackId != null && video.cancelVideoFrameCallback) {
+        video.cancelVideoFrameCallback(frameCallbackId);
+      }
+    };
   }, [videoRef, fps]);
 
-  // Update container size on mount and on window resize.
+  // Observe the actual panel rather than only the browser window. Sidebars and
+  // task panes can resize without emitting a window resize event.
   const updateContainerSize = useCallback(() => {
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
@@ -66,8 +77,13 @@ const VideoPlayer = ({
 
   useEffect(() => {
     updateContainerSize();
-    window.addEventListener('resize', updateContainerSize);
-    return () => window.removeEventListener('resize', updateContainerSize);
+    if (!containerRef.current || !window.ResizeObserver) {
+      window.addEventListener('resize', updateContainerSize);
+      return () => window.removeEventListener('resize', updateContainerSize);
+    }
+    const observer = new ResizeObserver(updateContainerSize);
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
   }, [updateContainerSize]);
 
   // Clamp panOffset when container size or zoomLevel changes.
@@ -105,11 +121,13 @@ const VideoPlayer = ({
     return () => vid.removeEventListener('timeupdate', handleUpdate);
   }, [selectedTask, videoRef]);
 
-  const getTotalFrameCount = () => {
-    if (videoRef.current && !isNaN(videoRef.current.duration)) {
-      return Math.ceil(videoRef.current.duration * fps - 1e-6);
+  const captureTotalFrameCount = () => {
+    const duration = videoRef.current?.duration;
+    if (Number.isFinite(duration) && Number.isFinite(fps)) {
+      // Capture once when the browser reads video metadata.  Do not derive
+      // this during every render from a duration that media helpers can alter.
+      setTotalFrameCount(Math.ceil(duration * fps - 1e-6));
     }
-    return 0;
   };
 
   // Pointer events for panning.
@@ -204,7 +222,7 @@ const VideoPlayer = ({
                 }}
               />
               <span className="text-gray-100">/</span>
-              <span className="text-gray-100">{getTotalFrameCount()}</span>
+              <span className="text-gray-100">{totalFrameCount}</span>
             </div>
           </div>
           )}
@@ -233,6 +251,7 @@ const VideoPlayer = ({
                 }}
                 onLoadedMetadata={() => {
                   setVideoReady(true);
+                  captureTotalFrameCount();
                   updateContainerSize();
                   setVideoDimensions({
                     width: videoRef.current.videoWidth,

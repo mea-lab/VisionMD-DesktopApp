@@ -136,6 +136,7 @@ const SubjectSelectionTab = ({
           <div className="flex flex-col items-center justify-center h-full gap-4 text-gray-100">
             <div>Process the video to start subject selection</div>
             <Button 
+            data-shortcut-action="process"
             variant="contained"
             onClick={() => setOpenJsonUpload(true)}
             sx={{

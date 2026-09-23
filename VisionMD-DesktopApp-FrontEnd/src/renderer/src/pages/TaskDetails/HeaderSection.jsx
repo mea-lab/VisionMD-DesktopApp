@@ -28,7 +28,8 @@ const HeaderSection = ({ title }) => {
           arrow
           title='Go back'
         >
-          <NavigateBefore
+        <NavigateBefore
+          data-shortcut-action="back"
             onClick={() => navigate('/tasks')}
             className="cursor-pointer text-white hover:text-gray-300"
             fontSize="medium"

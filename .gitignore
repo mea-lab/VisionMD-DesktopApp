@@ -22,6 +22,8 @@ build/
 
 # Packaging/build artifacts
 **/dist/
+!VisionMD-DesktopApp-BackEnd/dist/
+!VisionMD-DesktopApp-BackEnd/dist/**
 **/build/
 **/pyinstaller_builds/*
 !**/pyinstaller_builds/README.md
@@ -50,6 +52,8 @@ Videos
 !VisionMD-DesktopApp-BackEnd/app/analysis/models/metrabs_pytorch/**
 !VisionMD-DesktopApp-BackEnd/app/analysis/models/wilor_mini/
 !VisionMD-DesktopApp-BackEnd/app/analysis/models/wilor_mini/**
+!VisionMD-DesktopApp-BackEnd/app/analysis/models/wilor_temporal/
+!VisionMD-DesktopApp-BackEnd/app/analysis/models/wilor_temporal/wilor_bigru_refiner_final.pt
 VisionMD-DesktopApp-BackEnd/app/analysis/models/metrabs_pytorch/__pycache__/
 VisionMD-DesktopApp-BackEnd/app/analysis/models/metrabs_pytorch/**/*.pyc
 VisionMD-DesktopApp-BackEnd/app/analysis/models/metrabs_pytorch/scripts/*.pt

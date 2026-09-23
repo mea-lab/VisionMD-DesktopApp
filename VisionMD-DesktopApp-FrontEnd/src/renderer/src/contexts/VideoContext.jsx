@@ -62,7 +62,14 @@ export const VideoProvider = ({ children }) => {
                 const metadata = data.metadata;
                 
                 // Setting metadata and info 
-                setVideoURL(`${BASE_URL}${metadata.video_url}`);
+                // Project ids and filenames can be reused after a project is
+                // deleted.  A bare media URL can therefore make the browser
+                // reuse byte ranges from an older video with the same URL.
+                // That is especially damaging for MP4 files: the cached
+                // timeline can disagree with the file OpenCV processed.
+                const mediaVersion = encodeURIComponent(metadata.last_edited || Date.now());
+                const separator = metadata.video_url.includes('?') ? '&' : '?';
+                setVideoURL(`${BASE_URL}${metadata.video_url}${separator}v=${mediaVersion}`);
                 setFileName(metadata.video_name);
                 setFPS(metadata.fps);
 

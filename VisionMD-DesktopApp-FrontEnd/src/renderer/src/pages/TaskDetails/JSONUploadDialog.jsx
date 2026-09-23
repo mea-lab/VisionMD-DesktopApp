@@ -9,8 +9,7 @@ import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
 import { VideoContext } from '../../contexts/VideoContext';
-const API_URL = import.meta.env.VITE_API_BASE_URL;
-
+import { cancelAnalysisJob, runAnalysisJob } from '../../utils/analysisJobs';
 export default function JSONUploadDialog({
   dialogOpen,
   setDialogOpen,
@@ -28,8 +27,12 @@ export default function JSONUploadDialog({
   const [fileError, setFileError] = useState('');
   const [jsonContent, setJSONContent] = useState(null);
   const [serverProcessing, setServerProcessing] = useState(false);
+  const [analysisJob, setAnalysisJob] = useState(null);
 
-  const handleClose = () => {
+  const handleClose = async () => {
+    if (analysisJob?.id && ['queued', 'running'].includes(analysisJob.status)) {
+      await cancelAnalysisJob(analysisJob.id);
+    }
     setDialogOpen(false);
     setFileError('');
   };
@@ -62,11 +65,7 @@ export default function JSONUploadDialog({
   };
 
   const fetchAnalysisDetails = async () => {
-    const videoURL = videoRef.current.src;
-    const content = await fetch(videoURL).then(r => r.blob());
-
     try {
-      let uploadData = new FormData();
       let taskData = tasks[selectedTask];
 
       const chosenTaskBox = tasks.find(box => box.id === taskData.id);
@@ -95,7 +94,6 @@ export default function JSONUploadDialog({
       };
       
       jsonData = JSON.stringify(jsonData);
-      uploadData.append('json_data', jsonData);        
       const sanitizedTaskName = taskData.name
         .replace(/[^a-zA-Z0-9]+/g, ' ')
         .split(' ')
@@ -103,33 +101,17 @@ export default function JSONUploadDialog({
         .map(word => word.toLowerCase())
         .join('_');
 
-      // Build the API URL with the sanitized task name.
-      let apiURL = `${API_URL}/${sanitizedTaskName}/?id=${videoId}`;
-
-      console.log("API URL Generated as:", apiURL);
-      console.log("Upload data", JSON.parse(jsonData));
-
       setServerProcessing(true);
-      const response = await fetch(apiURL, {
-        method: 'POST',
-        body: uploadData,
+      const analysisResult = await runAnalysisJob({
+        taskName: sanitizedTaskName,
+        videoId,
+        jsonData,
+        onUpdate: setAnalysisJob,
       });
-      
-      if (response.ok) {
-        const data = await response.json();
-        console.log("Returned Data Content:", data)
-        handleJSONUpload(true, data);
-        setDialogOpen(false);
-        setServerProcessing(false);
-      } else {
-        if (response.status === 404) {
-          setServerProcessing(false);
-          throw new Error('404 Error: API route for task is not found!');
-        }
-        setServerProcessing(false);
-        const errorText = await response.text();
-        throw new Error(`Server responded with ${response.status} error:\n ${errorText}`);
-      }
+      handleJSONUpload(true, analysisResult);
+      setDialogOpen(false);
+      setServerProcessing(false);
+      setAnalysisJob(null);
 
     } catch (error) {
       setServerProcessing(false);
@@ -197,7 +179,11 @@ export default function JSONUploadDialog({
               <div
                 className='flex flex-col w-full h-full justify-center items-center gap-10 text-gray-100'
               >
-                <div>Server processing the request</div>
+                <div>
+                  {analysisJob?.status === 'queued'
+                    ? 'Analysis queued'
+                    : `Server processing the request (${analysisJob?.progress ?? 10}%)`}
+                </div>
                 <CircularProgress className='my-4' size={80} />
               </div>
             )}
@@ -206,14 +192,14 @@ export default function JSONUploadDialog({
         <DialogActions>
           {!serverProcessing && (
           <div className='flex flex-row justify-between w-full p-2'>
-            <button 
+              <button
               className={`rounded-md p-1.5 ${(jsonContent === null || serverProcessing) ? "bg-transparent text-gray-500" : "bg-[#1976d2] hover:bg-[#1565c0] text-gray-100"}`}
               onClick={handleJSONProcess}
               disabled={jsonContent === null || serverProcessing}
             >
               Process with JSON
             </button>
-            <button 
+            <button data-shortcut-action="auto-process"
               className='rounded-md bg-[#1976d2] hover:bg-[#1565c0] p-1 px-2 text-gray-100' 
               onClick={() => {
                 setFileError("");

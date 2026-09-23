@@ -4,6 +4,7 @@ import os
 import torch
 import cv2
 from ultralytics import YOLO
+from app.analysis.model_registry import get_model, reset_yolo_runtime
 
 # Fallback for MPS on Mac
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
@@ -17,7 +18,7 @@ def create_yolo_detector(model_path="yolov8s.pt", device='cpu'):
     if torch.backends.mps.is_available():
         device = 'mps'
 
-    return YOLO(model_path), device
+    return get_model(("yolo", os.path.abspath(model_path)), lambda: YOLO(model_path)), device
 
 
 def yolo_tracker(file_path, rotation, model_path="yolov8s.pt", device='cpu'):
@@ -31,7 +32,8 @@ def yolo_tracker(file_path, rotation, model_path="yolov8s.pt", device='cpu'):
         device = 'mps'
 
     # Load YOLO model
-    model = YOLO(model_path)
+    model = get_model(("yolo", os.path.abspath(model_path)), lambda: YOLO(model_path))
+    reset_yolo_runtime(model)
 
     cap = cv2.VideoCapture(file_path)
     boundingBoxes = []

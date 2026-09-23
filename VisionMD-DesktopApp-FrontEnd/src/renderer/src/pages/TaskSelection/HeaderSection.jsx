@@ -10,6 +10,7 @@ import { useNavigate } from 'react-router-dom';
 const HeaderSection = ({
   title,
   boundingBoxes,
+  persons,
   fileName,
   fps,
   moveToNextScreen,
@@ -20,9 +21,9 @@ const HeaderSection = ({
 
   const downloadConfig = () => {
     const fileData = {
-      fps: fps,
-      boundingBoxes: boundingBoxes,
-      tasks: tasks,
+      format: 'visionmd-project',
+      version: 1,
+      data: { fps, persons, boundingBoxes, tasks },
     };
     
     const json = JSON.stringify(fileData);
@@ -31,7 +32,7 @@ const HeaderSection = ({
     
     const link = document.createElement('a');
     link.href = href;
-    link.download = fileName.replace(/\.[^/.]+$/, '') + '_task_data.json';
+    link.download = fileName.replace(/\.[^/.]+$/, '') + '_visionmd_project.json';
     document.body.appendChild(link);
     link.click();
     
@@ -57,13 +58,14 @@ const HeaderSection = ({
       <div className="flex gap-3 items-center">
         <Tooltip arrow title="Go Back">
           <NavigateBefore
+            data-shortcut-action="back"
             onClick={() => navigate('/subjects')}
             className="cursor-pointer text-white hover:text-gray-300"
             fontSize="medium"
           />
         </Tooltip>
 
-        <Tooltip arrow title="Download Config">
+        <Tooltip arrow title="Download complete project">
           <Download
             onClick={notProceed ? undefined : downloadConfig}
             className={`cursor-pointer ${notProceed ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
@@ -73,6 +75,7 @@ const HeaderSection = ({
         
         <Tooltip arrow title="Go Forward">
           <NavigateNext
+            data-shortcut-action="forward"
             onClick={notProceed ? undefined : moveToNextScreen}
             className={`cursor-pointer ${notProceed ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
             fontSize="medium"
@@ -83,4 +86,4 @@ const HeaderSection = ({
   );
 };
 
-export default HeaderSection; 
+export default HeaderSection;

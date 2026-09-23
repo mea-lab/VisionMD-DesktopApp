@@ -115,15 +115,17 @@ const VideoDrawer = ({
     }
   }, [boundingBoxes, persons]);
 
-  const drawLandMarks = useCallback((scaleRatio) => {
+  const drawLandMarks = useCallback((scaleRatio, mediaTime) => {
     if (!tasks.length || selectedTask == null) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
     const currentTask = tasks[selectedTask];
-    const startFrame = Math.round(currentTask.start * fps);
-    const frameIndex = currentFrame.current - startFrame;
+    const landmarkFps = currentTask.data?.landmark_fps ?? fps;
+    const startFrame = currentTask.data?.landmark_start_frame
+      ?? Math.round(currentTask.start * landmarkFps);
+    const frameIndex = Math.round(mediaTime * landmarkFps) - startFrame;
     if (
       frameIndex < 0 ||
       !landMarks ||
@@ -186,7 +188,7 @@ const VideoDrawer = ({
       }
 
       if (screen === 'taskDetails' && isPlaying) {
-        drawLandMarks(scaleRatio);
+        drawLandMarks(scaleRatio, currentTime);
       }
     },
     [getFrameNumber, clearCanvas, drawVideoFrame, drawBoundingBoxes, drawLandMarks, landmark_colors, tasks, screen, isPlaying, zoomLevel]

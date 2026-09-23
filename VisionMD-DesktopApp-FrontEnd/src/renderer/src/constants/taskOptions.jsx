@@ -2,12 +2,10 @@
 
 // 1) Glob in all the JSX files from both folders
 const taskDetailsFiles = import.meta.glob(
-  '../pages/TaskDetails/Tasks/*.jsx',
-  { eager: true }
+  '../pages/TaskDetails/Tasks/*.jsx'
 );
 const taskSelectionFiles = import.meta.glob(
-  '../pages/TaskSelection/Tasks/*.jsx',
-  { eager: true }
+  '../pages/TaskSelection/Tasks/*.jsx'
 );
 
 // 2) Your existing list of legacy tasks
@@ -17,8 +15,10 @@ const taskOptions = [
   { value: 'Finger Tap Right', label: 'Finger Tap Right' },
   { value: 'Hand Movement Left', label: 'Hand Movement Left' },
   { value: 'Hand Movement Right', label: 'Hand Movement Right' },
-  { value: 'Hand Pronation Left', label: 'Hand Pronation Left' },
-  { value: 'Hand Pronation Right', label: 'Hand Pronation Right' },
+  // Keep the legacy values because they determine backend module/class names;
+  // the clearer labels are what users see in the task selection screen.
+  { value: 'Hand Pronation Left', label: 'Pronation/Supination Left' },
+  { value: 'Hand Pronation Right', label: 'Pronation/Supination Right' },
   { value: 'Toe tapping Left', label: 'Toe tapping Left' },
   { value: 'Toe tapping Right', label: 'Toe tapping Right' },
   { value: 'Leg agility Left', label: 'Leg agility Left' },

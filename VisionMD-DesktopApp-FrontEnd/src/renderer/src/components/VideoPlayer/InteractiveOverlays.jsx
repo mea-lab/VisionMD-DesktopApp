@@ -88,10 +88,12 @@ const InteractiveOverlays = ({
     if (!video) return;
     let frameCallbackId;
     const updateFrame = (now, metadata) => {
-      const frame = Math.round(metadata.mediaTime * fps);
+      const landmarkFps = tasks[selectedTask]?.data?.landmark_fps ?? fps;
+      const frame = Math.round(metadata.mediaTime * landmarkFps);
       // console.log("Interactive frame: " + frame)
       setCurrentFrame(frame);
-      const offset = Math.round((tasks[selectedTask]?.start ?? 0) * fps);
+      const offset = tasks[selectedTask]?.data?.landmark_start_frame
+        ?? Math.round((tasks[selectedTask]?.start ?? 0) * landmarkFps);
       setLandMarkIndex(frame - offset);
       frameCallbackId = video.requestVideoFrameCallback(updateFrame);
     };
@@ -101,7 +103,10 @@ const InteractiveOverlays = ({
         video.cancelVideoFrameCallback(frameCallbackId);
       }
     };
-  }, [videoRef, fps, isPlaying, selectedTask]);
+  // Recreate the frame callback when cached re-analysis changes the task
+  // window.  The landmark array is then cropped to the new start time, so a
+  // callback closed over the old task range would draw the wrong frame.
+  }, [videoRef, fps, isPlaying, selectedTask, tasks]);
 
   const getSVGPoint = (evt) => {
     const svg = svgRef.current;

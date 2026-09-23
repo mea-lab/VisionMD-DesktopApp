@@ -87,6 +87,10 @@ const TaskSelection = () => {
     setTasks(newTasks);
   };
 
+  const replaceTasksFromWaveform = replacementTasks => {
+    setTasks(replacementTasks.map(updateTaskWithBox));
+  };
+
   const resetTaskSelection = () => {
     setTasksReady(false);
     setTasks([]);
@@ -124,6 +128,7 @@ const TaskSelection = () => {
             fileName={fileName}
             fps={fps}
             boundingBoxes={boundingBoxes}
+            persons={persons}
             tasks={tasks}
             moveToNextScreen={moveToNextScreen}
           />
@@ -132,6 +137,7 @@ const TaskSelection = () => {
             setTasks={setTasks}
             onTaskCreate={onTaskCreate}
             onTaskChange={onTaskChange}
+            onTasksReplace={replaceTasksFromWaveform}
             fps={fps}
             videoRef={videoRef}
             isVideoReady={videoReady}

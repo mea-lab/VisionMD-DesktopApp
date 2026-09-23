@@ -6,20 +6,18 @@ import numpy as np
 import traceback
 from django.core.files.storage import FileSystemStorage
 import gc
-import tensorflow as tf
-from tensorflow.python.eager.context import context
 import cv2
 from tqdm import tqdm
-import tensorflow_hub as hub
+import torch
 import gc
 from PIL import Image
+from scipy.signal import savgol_filter
 from .base_task import BaseTask
 from django.conf import settings
 from rest_framework.response import Response
 
-from app.analysis.signal_analyzers.gait_signal_analyzer import GaitSignalAnalyzer
-from app.analysis.models.gait_transformer.gait_phase_transformer_old import load_default_model, get_gait_phase_stride_transformer, gait_phase_stride_inference
-from app.analysis.models.gait_transformer.gait_phase_kalman import gait_kalman_smoother, compute_phases, get_event_times
+from app.analysis.models.metrabs_pytorch.loader import load_model as load_metrabs_model
+from app.analysis.models.gait_transformer.gait_phase_transformer_pytorch import load_default_model, gait_phase_stride_inference
 
 
 
@@ -33,7 +31,9 @@ class GaitTask(BaseTask):
                             'lkne', 'lank', 'pelv', 'spin', 'head'])
         
     skeleton = 'mpi_inf_3dhp_17'
-    _gait_phase_transformer = None
+    # Transformer positional encoding depends on video FPS. Keep one warmed
+    # model per divider instead of deleting/reloading it after every task.
+    _gait_phase_transformers = {}
     _metrabs_detector = None
     _metrabs_joint_order = np.array(['htop', 'neck', 'rsho', 'relb', 'rwri', 'lsho',
                             'lelb', 'lwri', 'rhip', 'rkne', 'rank', 'lhip', 
@@ -83,41 +83,36 @@ class GaitTask(BaseTask):
             self.prepare_video_parameters(request)
 
             # 2) Getting detector and using detector to get landmarks
-            with tf.device('/CPU:0'):
-                detector = self.get_detector()
+            detector = self.get_detector()
             landmarks, landmarks_mirrored = self.extract_landmarks(detector)
-
-            tf.keras.backend.clear_session()
-            context().clear_kernel_cache()
 
             # 2) Getting signals
             phases, strides, signals = self.calculate_signal(landmarks['poses3d'], self.height_cm * 10)
             phases_mirrored, strides_mirrored, signals_mirrored = self.calculate_signal(landmarks_mirrored['poses3d'], self.height_cm * 10)
 
-            # 3) Get signal analyzer to use it to get feature results
+            # 3) Analyze straight walking.  When a turn is present, exclude the
+            # turn itself and pool the individual steps from both directions.
             signal_analyzer = self.get_signal_analyzer()
-            print("Analyzing original signal...")
-            try:
-                results, gait_event_dic = signal_analyzer.analyze(phases, strides, landmarks['poses3d'], self.fps)
-            except Exception as e:
-                print("Analyzing original signal failed")
-                raise Exception(e)
-            print("Analyzing original signal passed")
-            
-
-            print("Analyzing mirrored signal...")
-            try:
-                results_mirrored, gait_event_dic_mirrored = signal_analyzer.analyze(phases_mirrored, strides_mirrored, landmarks_mirrored['poses3d'], self.fps)
-            except Exception as e:
-                print("Analyzing mirrored signal failed")
-                raise Exception(e)
+            # Use the anatomical labels exactly as MeTRAbs produced them for
+            # orientation.  The continuity-based left/right correction used by
+            # gait inference can intentionally swap labels as a person turns and
+            # would otherwise hide a real 180-degree body rotation.
+            turning_metadata = self.detect_turn(landmarks['poses3d_orientation'])
+            analysis = self.analyze_straight_walking_segments(
+                signal_analyzer,
+                phases,
+                strides,
+                landmarks['poses3d'],
+                phases_mirrored,
+                strides_mirrored,
+                landmarks_mirrored['poses3d'],
+                turning_metadata,
+            )
+            results = analysis["results"]
+            results_mirrored = analysis["results_mirrored"]
+            gait_event_dic = analysis["gait_event_dic"]
+            gait_event_dic_mirrored = analysis["gait_event_dic_mirrored"]
             avg_results = self.calculate_average_features(results, results_mirrored)
-            print("Analyzing mirrored signal passed")
-
-            del GaitTask._gait_phase_transformer, signal_analyzer
-            GaitTask._gait_phase_transformer, signal_analyzer = None, None
-            tf.keras.backend.clear_session()
-            context().clear_kernel_cache()
 
             # 5) Get landmark colors
             landmark_colors = self.calculate_landmark_colors(landmarks['poses3d'], gait_event_dic, self.fps)
@@ -139,16 +134,257 @@ class GaitTask(BaseTask):
                 for k, v in gait_event_dic_mirrored.items()
             }
             response['landmark_colors'] = landmark_colors.tolist()
+            response['turning_metadata'] = turning_metadata
+            response['segment_metrics'] = analysis["segment_metrics"]
+            response['gait_quality'] = analysis["quality"]
+            # Cache the outputs downstream of MeTRAbs so users can adjust the
+            # walking/turn boundaries without running 3D pose estimation again.
+            # These arrays are analysis data, not a second landmark estimate.
+            response['gait_analysis_cache'] = {
+                'fps': float(self.fps),
+                'start_time': float(self.start_time),
+                'start_frame_idx': int(self.start_frame_idx),
+                'poses3d': landmarks['poses3d'].tolist(),
+                'poses3d_orientation': landmarks['poses3d_orientation'].tolist(),
+                'poses3d_mirrored': landmarks_mirrored['poses3d'].tolist(),
+                'phases': phases.tolist(),
+                'strides': strides.tolist(),
+                'phases_mirrored': phases_mirrored.tolist(),
+                'strides_mirrored': strides_mirrored.tolist(),
+            }
         except Exception as e:
             return Response(f"Error with gait analysis: {str(e)}", status=500)
         finally:
             # 5) Clean up memory
             if hasattr(self, "video") and self.video is not None:
                 self.video.release()
-            tf.keras.backend.clear_session()
-            context().clear_kernel_cache()
 
         return response
+
+    def detect_turn(self, poses_3d, minimum_turn_degrees=75.0):
+        """Estimate one dominant body turn from the 3D shoulder/hip orientation.
+
+        MeTRAbs does not provide a turn label, so the yaw proxy is formed from
+        directed right-to-left shoulder and hip axes.  Only this one-dimensional
+        orientation trace is smoothed; the landmark coordinates used for gait
+        features remain untouched.  Turn boundaries are the 5% and 95% crossings
+        of the net orientation change, making the reported duration and angular
+        speeds independent of the walking speed toward or away from the camera.
+        """
+        poses = np.asarray(poses_3d, dtype=float)
+        empty = {
+            "is_turning": False,
+            "start_frame": None,
+            "end_frame": None,
+            "start_video_frame": None,
+            "end_video_frame": None,
+            "start_time_seconds": None,
+            "end_time_seconds": None,
+            "duration_seconds": None,
+            "angle_degrees": None,
+            "mean_angular_speed_degrees_per_second": None,
+            "peak_angular_speed_degrees_per_second": None,
+            "direction": None,
+        }
+        if poses.ndim != 3 or len(poses) < 5:
+            return empty
+
+        yaw = self._body_yaw(poses)
+        if yaw is None:
+            return empty
+
+        plateau = max(2, min(len(yaw) // 5, int(round(float(self.fps) * 0.5))))
+        start_yaw = float(np.median(yaw[:plateau]))
+        end_yaw = float(np.median(yaw[-plateau:]))
+        delta = end_yaw - start_yaw
+        angle_degrees = float(np.degrees(delta))
+        if abs(angle_degrees) < minimum_turn_degrees:
+            return empty
+
+        signed_progress = (yaw - start_yaw) * np.sign(delta)
+        total = abs(delta)
+        start_candidates = np.flatnonzero(signed_progress >= 0.05 * total)
+        if not len(start_candidates):
+            return empty
+        start_frame = int(start_candidates[0])
+        end_candidates = np.flatnonzero(
+            (np.arange(len(yaw)) > start_frame) & (signed_progress >= 0.95 * total)
+        )
+        if not len(end_candidates):
+            return empty
+        return self.measure_turn_range(poses, start_frame, int(end_candidates[0]))
+
+    def _body_yaw(self, poses_3d):
+        """Return the smoothed body-orientation trace used for turn analysis."""
+        poses = np.asarray(poses_3d, dtype=float)
+        if poses.ndim != 3 or len(poses) < 5:
+            return None
+        indices = {name: int(np.where(self._metrabs_joint_order == name)[0][0])
+                   for name in ("rsho", "lsho", "rhip", "lhip")}
+        hip_axis = poses[:, indices["rhip"]] - poses[:, indices["lhip"]]
+        shoulder_axis = poses[:, indices["rsho"]] - poses[:, indices["lsho"]]
+
+        def normalize(vectors):
+            lengths = np.linalg.norm(vectors, axis=1, keepdims=True)
+            return vectors / np.where(lengths > 1e-9, lengths, np.nan)
+
+        hip_axis, shoulder_axis = normalize(hip_axis), normalize(shoulder_axis)
+        reverse_shoulder = np.nansum(hip_axis * shoulder_axis, axis=1) < 0
+        shoulder_axis[reverse_shoulder] *= -1
+        body_axis = normalize(hip_axis + shoulder_axis)
+        yaw = np.unwrap(np.arctan2(body_axis[:, 2], body_axis[:, 0]))
+        if not np.all(np.isfinite(yaw)):
+            valid = np.isfinite(yaw)
+            if valid.sum() < 5:
+                return None
+            yaw = np.interp(np.arange(len(yaw)), np.flatnonzero(valid), yaw[valid])
+
+        desired_window = max(5, int(round(float(self.fps) * 0.25)))
+        window = min(desired_window, len(yaw) if len(yaw) % 2 else len(yaw) - 1)
+        if window >= 5:
+            yaw = savgol_filter(yaw, window_length=window, polyorder=2, mode="interp")
+        return yaw
+
+    def measure_turn_range(self, poses_3d, start_frame, end_frame):
+        """Measure a detected or manually selected turn interval."""
+        yaw = self._body_yaw(poses_3d)
+        if yaw is None:
+            raise ValueError("Unable to calculate body orientation for this gait task.")
+        start_frame = int(np.clip(start_frame, 0, len(yaw) - 2))
+        end_frame = int(np.clip(end_frame, start_frame + 1, len(yaw) - 1))
+        start_yaw = float(yaw[start_frame])
+        end_yaw = float(yaw[end_frame])
+        delta = end_yaw - start_yaw
+        angle_degrees = float(np.degrees(delta))
+        duration = (end_frame - start_frame) / float(self.fps)
+        angular_velocity = np.gradient(yaw, 1.0 / float(self.fps))
+        peak_speed = float(np.degrees(np.max(np.abs(angular_velocity[start_frame:end_frame + 1]))))
+        return {
+            "is_turning": True,
+            "start_frame": start_frame,
+            "end_frame": end_frame,
+            "start_video_frame": int(self.start_frame_idx + start_frame),
+            "end_video_frame": int(self.start_frame_idx + end_frame),
+            "start_time_seconds": float(self.start_time + start_frame / self.fps),
+            "end_time_seconds": float(self.start_time + end_frame / self.fps),
+            "duration_seconds": float(duration),
+            "angle_degrees": angle_degrees,
+            "mean_angular_speed_degrees_per_second": float(abs(angle_degrees) / duration),
+            "peak_angular_speed_degrees_per_second": peak_speed,
+            "direction": "positive_yaw" if delta > 0 else "negative_yaw",
+        }
+
+    def analyze_straight_walking_segments(
+        self,
+        analyzer,
+        phases,
+        strides,
+        poses,
+        phases_mirrored,
+        strides_mirrored,
+        poses_mirrored,
+        turning_metadata,
+    ):
+        """Analyze non-turning portions and pool their individual gait events."""
+        frame_count = len(poses)
+        if turning_metadata["is_turning"]:
+            candidate_ranges = [
+                (0, int(turning_metadata["start_frame"])),
+                (int(turning_metadata["end_frame"]) + 1, frame_count),
+            ]
+        else:
+            candidate_ranges = [(0, frame_count)]
+
+        original_samples, mirrored_samples = [], []
+        original_events = {key: [] for key in ("left_down", "left_up", "right_down", "right_up")}
+        mirrored_events = {key: [] for key in original_events}
+        segment_metrics, segment_quality = [], []
+
+        for segment_index, (start, end) in enumerate(candidate_ranges, start=1):
+            if end - start < max(5, int(round(self.fps))):
+                segment_quality.append({
+                    "segment": segment_index,
+                    "start_frame": start,
+                    "end_frame": max(start, end - 1),
+                    "used": False,
+                    "reason": "segment shorter than one second",
+                })
+                continue
+            try:
+                result, events, samples, quality = analyzer.analyze(
+                    phases[start:end], strides[start:end], poses[start:end], self.fps,
+                    return_details=True,
+                )
+                mirrored_result, mirrored_segment_events, mirrored_segment_samples, mirrored_quality = analyzer.analyze(
+                    phases_mirrored[start:end], strides_mirrored[start:end],
+                    poses_mirrored[start:end], self.fps, return_details=True,
+                )
+            except Exception as exc:
+                segment_quality.append({
+                    "segment": segment_index,
+                    "start_frame": start,
+                    "end_frame": end - 1,
+                    "used": False,
+                    "reason": str(exc),
+                })
+                continue
+
+            original_samples.append(samples)
+            mirrored_samples.append(mirrored_segment_samples)
+            for key in original_events:
+                original_events[key].extend((np.asarray(events[key]) + start).tolist())
+                mirrored_events[key].extend((np.asarray(mirrored_segment_events[key]) + start).tolist())
+
+            direction = self._walking_direction(poses[start:end])
+            segment_metrics.append({
+                "segment": segment_index,
+                "direction_qc": direction,
+                "start_frame": int(start),
+                "end_frame": int(end - 1),
+                "start_video_frame": int(self.start_frame_idx + start),
+                "end_video_frame": int(self.start_frame_idx + end - 1),
+                "step_count": int(len(events["left_down"]) + len(events["right_down"])),
+                "features": self._json_numbers(result),
+            })
+            segment_quality.append({
+                "segment": segment_index,
+                "start_frame": start,
+                "end_frame": end - 1,
+                "used": True,
+                "original": quality,
+                "mirrored": mirrored_quality,
+            })
+
+        if not original_samples:
+            raise ValueError("No straight-walking segment contained enough valid gait events.")
+
+        return {
+            "results": analyzer.pool_feature_samples(original_samples),
+            "results_mirrored": analyzer.pool_feature_samples(mirrored_samples),
+            "gait_event_dic": {key: np.asarray(value, dtype=float) for key, value in original_events.items()},
+            "gait_event_dic_mirrored": {key: np.asarray(value, dtype=float) for key, value in mirrored_events.items()},
+            "segment_metrics": segment_metrics,
+            "quality": {
+                "turn_excluded_from_primary_results": bool(turning_metadata["is_turning"]),
+                "pooling_method": "all valid straight-walking events",
+                "segments": segment_quality,
+            },
+        }
+
+    def _walking_direction(self, poses):
+        pelvis_index = int(np.where(self._metrabs_joint_order == "pelv")[0][0])
+        depth = np.asarray(poses, dtype=float)[:, pelvis_index, 2]
+        valid = np.isfinite(depth)
+        if valid.sum() < 2:
+            return "unknown"
+        slope = np.polyfit(np.flatnonzero(valid), depth[valid], 1)[0]
+        if abs(slope) < 1e-6:
+            return "approximately_stationary_depth"
+        return "toward_camera" if slope < 0 else "away_from_camera"
+
+    @staticmethod
+    def _json_numbers(values):
+        return {key: float(value) if np.isfinite(value) else None for key, value in values.items()}
 
     
 
@@ -203,7 +439,22 @@ class GaitTask(BaseTask):
         start_time = json_data['start_time']
         end_time = json_data['end_time']
         start_frame_idx = math.floor(fps * start_time)
-        end_frame_idx   = math.ceil(fps * end_time)
+        end_frame_idx = math.ceil(fps * end_time)
+
+        # The browser duration is not always exactly frame_count / FPS (in
+        # particular after the upload has been converted to a CFR working
+        # video).  A Full Video task must use the frames we can actually
+        # decode and track; otherwise the final browser-derived indices have
+        # no subject bounding boxes and gait aborts before landmark inference.
+        if json_data.get('full_video'):
+            decoded_frame_count = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+            if decoded_frame_count < 1:
+                raise Exception("Unable to determine the number of frames in the video.")
+            start_time = 0.0
+            end_time = decoded_frame_count / fps
+            start_frame_idx = 0
+            # The video reader treats this index as inclusive.
+            end_frame_idx = decoded_frame_count - 1
         original_bounding_box = json_data['boundingBox']
         subject_bounding_boxes = [box for box in json_data['subject_bounding_boxes'] if start_frame_idx <= box['frameNumber'] <= end_frame_idx]
         new_x = int(max(0, original_bounding_box['x'] - original_bounding_box['width'] * 0.125))
@@ -297,19 +548,15 @@ class GaitTask(BaseTask):
 
         Returns an instance of the detector using the detectors classes
         """
-        with tf.device('/CPU:0'):
-            if GaitTask._metrabs_detector is None:
-                print("Grabbing metrabs models")
-                model_path = os.path.join(settings.BASE_DIR, 'app', 'analysis', 'models', 'metrabs_eff2s_y4' )
-                
-
-                if os.path.isdir(model_path):
-                    GaitTask._metrabs_detector = hub.load(model_path)
-                    print("Model loaded from ./metrabs_eff2s_y4")
-                else:
-                    raise Exception("This version of VisionMD was not built with metrabs_eff2s_y4")
-
-            return GaitTask._metrabs_detector
+        if GaitTask._metrabs_detector is None:
+            print("Loading PyTorch MeTRAbs model")
+            model_path = os.path.join(
+                settings.BASE_DIR, 'app', 'analysis', 'models',
+                'metrabs_eff2l_384px_800k_28ds_pytorch'
+            )
+            GaitTask._metrabs_detector = load_metrabs_model(model_path)
+            print("PyTorch MeTRAbs model loaded")
+        return GaitTask._metrabs_detector
 
 
 
@@ -319,6 +566,8 @@ class GaitTask(BaseTask):
 
         Returns an instance of the signal analyze using the analyzer classes
         """
+        # Import lazily so landmark inference does not initialize JAX.
+        from app.analysis.signal_analyzers.gait_signal_analyzer import GaitSignalAnalyzer
         return GaitSignalAnalyzer()
 
     
@@ -334,9 +583,12 @@ class GaitTask(BaseTask):
             pos_divider (int): Positional divider used in model loading
         """
 
-        pos_divider = round(self.fps / 30.0)
-        if GaitTask._gait_phase_transformer is None:
-            GaitTask._gait_phase_transformer = load_default_model(pos_divider=pos_divider)
+        pos_divider = max(1, round(self.fps / 30.0))
+        if pos_divider not in GaitTask._gait_phase_transformers:
+            GaitTask._gait_phase_transformers[pos_divider] = load_default_model(
+                pos_divider=pos_divider
+            )
+        gait_phase_transformer = GaitTask._gait_phase_transformers[pos_divider]
         GaitTask._gait_phase_order_idx = np.array(
             [self._metrabs_joint_order.tolist().index(j) for j in GaitTask._gait_phase_joint_order]
         )
@@ -350,7 +602,9 @@ class GaitTask(BaseTask):
 
         # Run inference
         height_arr = np.array(height_mm, dtype=float)
-        phases, strides = gait_phase_stride_inference(keypoints, height_arr, GaitTask._gait_phase_transformer, int(L * pos_divider))
+        phases, strides = gait_phase_stride_inference(
+            keypoints, height_arr, gait_phase_transformer, int(L * pos_divider)
+        )
             
         signals = {}
 
@@ -419,8 +673,9 @@ class GaitTask(BaseTask):
         for frame_batch in tqdm(vid, desc=f"Processing {file_name}"):
             # --- Prepare tensors for BOTH original and mirrored batches ---
             batch_np = frame_batch
-            batch_tensor = tf.convert_to_tensor(batch_np, dtype=tf.uint8)
-            batch_tensor_mirr = tf.image.flip_left_right(batch_tensor)
+            device = GaitTask._metrabs_detector.device
+            batch_tensor = torch.from_numpy(batch_np).permute(0, 3, 1, 2).to(device=device, dtype=torch.uint8)
+            batch_tensor_mirr = torch.flip(batch_tensor, dims=[3])
             batch_size = batch_tensor.shape[0]
             frame_idx_list = list(range(raw_frame_idx, raw_frame_idx + batch_size))
             raw_frame_idx += batch_size
@@ -448,8 +703,8 @@ class GaitTask(BaseTask):
                 mirrored_x = rot_w - (x + w)
                 mirrored_list.append([[mirrored_x, y, w, h]])
 
-            boxes = tf.ragged.constant(boxes_list, ragged_rank=1, inner_shape=(4,), dtype=tf.float32)
-            boxes_mirrored = tf.ragged.constant(mirrored_list, ragged_rank=1, inner_shape=(4,), dtype=tf.float32)
+            boxes = torch.as_tensor(boxes_list, dtype=torch.float32, device=device)
+            boxes_mirrored = torch.as_tensor(mirrored_list, dtype=torch.float32, device=device)
 
             # --- Set up optional camera parameters for this ---
             scalar_camera_args = {
@@ -461,7 +716,7 @@ class GaitTask(BaseTask):
                 if v != None
             }
             matrix_camera_args = {
-                k: tf.convert_to_tensor(np.stack([v] * batch_size).astype(np.float32))
+                k: torch.as_tensor(np.stack([v] * batch_size), dtype=torch.float32, device=device)
                 for k, v in {
                     "intrinsic_matrix": self.intrinsic_matrix,
                     "extrinsic_matrix": self.extrinsic_matrix,
@@ -470,32 +725,33 @@ class GaitTask(BaseTask):
             }
             print("matrix_camera_args",matrix_camera_args)
 
-            pred = GaitTask._metrabs_detector.estimate_poses_batched(
-                images=batch_tensor,
-                boxes=boxes,
-                skeleton=self.skeleton,
-                **scalar_camera_args,
-                **matrix_camera_args,
-            )
-            pred_mirr = GaitTask._metrabs_detector.estimate_poses_batched(
-                images=batch_tensor_mirr,
-                boxes=boxes_mirrored,
-                skeleton=self.skeleton,
-                **scalar_camera_args,
-                **matrix_camera_args,
-            )
+            with torch.inference_mode(), torch.device(device):
+                pred = GaitTask._metrabs_detector.estimate_poses_batched(
+                    images=batch_tensor,
+                    boxes=boxes,
+                    skeleton=self.skeleton,
+                    **scalar_camera_args,
+                    **matrix_camera_args,
+                )
+                pred_mirr = GaitTask._metrabs_detector.estimate_poses_batched(
+                    images=batch_tensor_mirr,
+                    boxes=boxes_mirrored,
+                    skeleton=self.skeleton,
+                    **scalar_camera_args,
+                    **matrix_camera_args,
+                )
 
             # --- Accumulate both original and mirrored detections ---
             for j in range(batch_size):
                 # ORIGINAL
                 if pred["poses2d"][j].shape[0] > 0:
-                    poses2d_lists.append(pred["poses2d"][j:j+1, 0:1].numpy())
-                    poses3d_lists.append(pred["poses3d"][j:j+1, 0:1].numpy())
+                    poses2d_lists.append(pred["poses2d"][j][0].detach().cpu().numpy())
+                    poses3d_lists.append(pred["poses3d"][j][0].detach().cpu().numpy())
                     missing = False
                 else:
                     # fill NaNs
-                    poses2d_lists.append(np.full([1,1,17,2], np.nan, np.float16))
-                    poses3d_lists.append(np.full([1,1,17,3], np.nan, np.float16))
+                    poses2d_lists.append(np.full([17,2], np.nan, np.float32))
+                    poses3d_lists.append(np.full([17,3], np.nan, np.float32))
                     missing = True
                 missing_mask.append(missing)
                 if pred["poses2d"][j].shape[0] > 1:
@@ -503,34 +759,39 @@ class GaitTask(BaseTask):
 
                 # MIRRORED
                 if pred_mirr["poses2d"][j].shape[0] > 0:
-                    poses2d_lists_mirr.append(pred_mirr["poses2d"][j:j+1, 0:1].numpy())
-                    poses3d_lists_mirr.append(pred_mirr["poses3d"][j:j+1, 0:1].numpy())
+                    poses2d_lists_mirr.append(pred_mirr["poses2d"][j][0].detach().cpu().numpy())
+                    poses3d_lists_mirr.append(pred_mirr["poses3d"][j][0].detach().cpu().numpy())
                 else:
-                    poses2d_lists_mirr.append(np.full([1,1,17,2], np.nan, np.float16))
-                    poses3d_lists_mirr.append(np.full([1,1,17,3], np.nan, np.float16))
+                    poses2d_lists_mirr.append(np.full([17,2], np.nan, np.float32))
+                    poses3d_lists_mirr.append(np.full([17,3], np.nan, np.float32))
 
             del pred, pred_mirr, batch_tensor, batch_tensor_mirr
 
         # --- Post‐processing for ORIGINAL ---
-        all_poses2d = np.concatenate(poses2d_lists, axis=0)[:,0,:,:]
+        all_poses2d = np.stack(poses2d_lists, axis=0)
         ox1 = self.original_bounding_box['x']
         oy1 = self.original_bounding_box['y']
-        all_poses3d = np.concatenate(poses3d_lists, axis=0)[:,0,:,:]
+        all_poses3d = np.stack(poses3d_lists, axis=0)
         missing_mask = np.array(missing_mask)
         interp2d = self.interpolate_missing_poses(all_poses2d, missing_mask)
         interp3d = self.interpolate_missing_poses(all_poses3d, missing_mask)
         corr3d   = self.correct_left_right_swapping(interp3d)
-        all_preds = {"poses2d": interp2d, "poses3d": corr3d}
+        all_preds = {
+            "poses2d": interp2d,
+            "poses3d": corr3d,
+            "poses3d_orientation": interp3d,
+        }
 
         # --- Post‐processing for MIRRORED (same pipeline) ---
-        mir_poses2d = np.concatenate(poses2d_lists_mirr, axis=0)[:,0,:,:]
-        mir_poses3d = np.concatenate(poses3d_lists_mirr, axis=0)[:,0,:,:]
+        mir_poses2d = np.stack(poses2d_lists_mirr, axis=0)
+        mir_poses3d = np.stack(poses3d_lists_mirr, axis=0)
         mir_interp2d = self.interpolate_missing_poses(mir_poses2d, missing_mask)
         mir_interp3d = self.interpolate_missing_poses(mir_poses3d, missing_mask)
         mir_corr3d   = self.correct_left_right_swapping(mir_interp3d)
         mirrored_all_preds = {
             "poses2d": mir_interp2d,
             "poses3d": mir_corr3d,
+            "poses3d_orientation": mir_interp3d,
         }
 
         # --- warnings & return ---
@@ -634,6 +895,32 @@ class GaitTask(BaseTask):
             "Average step length right": (original_features["Average step length right"] + mirrored_features["Average step length left"]) / 2.0,
             "Arm swing correlation": (original_features["Arm swing correlation"] + mirrored_features["Arm swing correlation"]) / 2.0,
         }
+        # A mirrored pass exchanges anatomical left/right. Preserve that
+        # relationship while averaging the new wrist-amplitude measures.
+        if "Arm swing left" in original_features and "Arm swing right" in mirrored_features:
+            average["Arm swing left"] = (
+                original_features["Arm swing left"] + mirrored_features["Arm swing right"]
+            ) / 2.0
+        if "Arm swing right" in original_features and "Arm swing left" in mirrored_features:
+            average["Arm swing right"] = (
+                original_features["Arm swing right"] + mirrored_features["Arm swing left"]
+            ) / 2.0
+        # SynthGait-compatible features are symmetric under the mirrored pass.
+        # They are optional to preserve compatibility with older imported JSON.
+        for name in (
+            "SynthGait step length",
+            "Step width",
+            "Stooped posture",
+            "Arm swing",
+            "Step length variability",
+            "Step width variability",
+            "Step speed variability",
+            "Torso medial-lateral displacement",
+            "Torso medial-lateral displacement range",
+            "Torso medial-lateral trunk motion ROM",
+        ):
+            if name in original_features and name in mirrored_features:
+                average[name] = (original_features[name] + mirrored_features[name]) / 2.0
                 
         return average
     

@@ -2,6 +2,7 @@ import {useState, useEffect} from 'react'
 import ScatterPlot from '../Tables/ScatterPlot';
 import FeatureTable from '../Tables/FeatureTable'
 import GaitGraphs from '../Graphs/GaitGraphs';
+import GaitSegmentsPanel from '../Graphs/GaitSegmentsPanel';
 
 const Gait = ({
   selectedTaskIndex,
@@ -17,6 +18,12 @@ const Gait = ({
       <div>
           {tasks[selectedTaskIndex] && (
             <div>
+              <GaitSegmentsPanel
+                selectedTaskIndex={selectedTaskIndex}
+                tasks={tasks}
+                setTasks={setTasks}
+                videoRef={videoRef}
+              />
               <GaitGraphs
                 selectedTaskIndex={selectedTaskIndex}
                 tasks={tasks}

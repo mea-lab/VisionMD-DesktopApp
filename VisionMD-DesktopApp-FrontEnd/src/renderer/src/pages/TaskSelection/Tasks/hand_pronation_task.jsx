@@ -12,12 +12,13 @@ const HandPronationTask = ({ side, task, onFieldChange, onTaskDelete, onTimeMark
     // P/S is an angular signal, so hand-size normalization is intentionally
     // not applied.  The backend always keeps the scale at 1 degree/degree.
     if (!task.norm_strategy) onFieldChange('NONE', 'norm_strategy', task);
+    if (!task.ps_method) onFieldChange('auto', 'ps_method', task);
   }, []);
 
   return (
     <div tabIndex={-1} className="flex-none border-2 border-zinc-500 rounded-lg mb-4 min-h-[50px] bg-zinc-600 focus:border-blue-500 focus:outline-none transition-all duration-500 ease-in-out">
       <div className="flex items-center gap-4 justify-between px-4 py-2 bg-transparent text-gray-100">
-        Hand Pronation/Supination {side} #{task.id}
+        Pronation/Supination {side} #{task.id}
         <div>
           <IconButton size="small" className={`transform transition-transform duration-200 ${open ? 'rotate-180' : 'rotate-0'}`} onClick={event => { event.stopPropagation(); setOpen(value => !value); }} aria-label="Toggle details">
             <ExpandMoreIcon className="text-gray-100" fontSize="small" />
@@ -40,7 +41,17 @@ const HandPronationTask = ({ side, task, onFieldChange, onTaskDelete, onTimeMark
             <TimeInput label="Start" value={task.start} onChange={value => onFieldChange(value, 'start', task)} onMark={() => onTimeMark('start', task)} onJump={() => onTimeClick(task.start)} />
             <TimeInput label="End" value={task.end} onChange={value => onFieldChange(value, 'end', task)} onMark={() => onTimeMark('end', task)} onJump={() => onTimeClick(task.end)} />
           </div>
+          <div className="flex w-full items-center gap-2 text-sm text-gray-100">
+            <label htmlFor={`ps-method-${task.id}`}>Analysis engine:</label>
+            <select id={`ps-method-${task.id}`} value={task.ps_method || 'auto'}
+              onChange={event => onFieldChange(event.target.value, 'ps_method', task)}
+              className="rounded-lg border border-zinc-500 bg-zinc-600 px-2 py-1.5 text-gray-100">
+              <option value="auto">MediaPipe screening, then WiLoR if needed</option>
+              <option value="wilor">WiLoR only</option>
+            </select>
+          </div>
           <p className="text-gray-200 text-sm">The P/S signal is palm orientation in degrees around the forearm axis; it is not hand-size normalized.</p>
+          <p className="text-amber-300 text-xs">MediaPipe 3-D results are provisional and must be visually verified. Failed screening automatically falls back to WiLoR.</p>
         </div>
       </Collapse>
     </div>

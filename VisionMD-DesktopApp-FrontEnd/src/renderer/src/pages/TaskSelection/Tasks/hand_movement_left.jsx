@@ -21,7 +21,7 @@ const HandMovementLeft = ({
 
   useEffect(() => {
     if (!task.norm_strategy) {
-      onFieldChange('INDEXSIZE', 'norm_strategy', task);
+      onFieldChange('PALMSIZE', 'norm_strategy', task);
     }
   }, []);
 
@@ -125,7 +125,7 @@ const HandMovementLeft = ({
               <label className="inline whitespace-nowrap text-gray-100">Normalization: </label>
                 <select
                   className="py-1.5 pl-2 w-[150px] border rounded-lg text-gray-100 bg-zinc-600 border-zinc-500"
-                  value={task?.norm_strategy? task.norm_strategy: "INDEXSIZE"}
+                  value={task?.norm_strategy? task.norm_strategy: "PALMSIZE"}
                   onChange={e => onFieldChange(e.target.value, 'norm_strategy', task)}
                 >
                   <option value="INDEXSIZE">Index finger size</option>

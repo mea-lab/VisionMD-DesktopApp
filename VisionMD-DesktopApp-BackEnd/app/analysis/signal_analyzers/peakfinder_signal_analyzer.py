@@ -5,6 +5,7 @@ import scipy.signal as signal
 import scipy.signal as signal
 import scipy.interpolate as interpolate
 from app.analysis.signal_analyzers.base_signal_analyzer import BaseSignalAnalyzer
+from app.analysis.signal_analyzers.finder_peaks_signal import peakFinder as normalized_peakFinder
 from scipy.ndimage import median_filter
 import math
 
@@ -237,7 +238,7 @@ def scaling(landmarks, scale='THUMBSIZE'):
 
 def get_output(up_sample_signal):
     fs = 60
-    distance, velocity, peaks, indexPositiveVelocity, indexNegativeVelocity = peakFinder(
+    distance, velocity, peaks, indexPositiveVelocity, indexNegativeVelocity = normalized_peakFinder(
         up_sample_signal, fs=fs, minDistance=3, cutOffFrequency=7.5, prct=0.05
     )
 

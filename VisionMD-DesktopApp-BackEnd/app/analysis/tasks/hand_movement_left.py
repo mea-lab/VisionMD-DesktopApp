@@ -100,6 +100,11 @@ class HandMovementLeftTask(BaseTask):
             output["landMarks"] = essential_landmarks
             output["allLandMarks"] = all_landmarks
             output["normalization_factor"] = normalization_factor
+            # The frontend must map playback time back to this exact detector
+            # sequence.  Persist source-frame metadata rather than deriving it
+            # from a UI range or a rounded display FPS.
+            output["landmark_start_frame"] = self.task_start_frame_idx
+            output["landmark_fps"] = self.video_fps
 
         except Exception as e:
             return Response(f"{e}", status=500)
@@ -148,6 +153,19 @@ class HandMovementLeftTask(BaseTask):
         task_norm_strategy = json_data['norm_strategy']
         task_start_time = json_data['start_time']
         task_end_time = json_data['end_time']
+
+        # A browser/container duration can occasionally be longer than the
+        # decodable video stream.  For Full video mode, use the actual decoded
+        # frame count so landmark index N always belongs to video frame N.
+        # Without this clamp the detector stops at the real final frame while
+        # the analyzer stretches those landmarks across the longer UI range.
+        if json_data.get('full_video'):
+            capture = cv2.VideoCapture(video_file_path)
+            frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+            capture.release()
+            if frame_count > 1:
+                task_start_time = 0.0
+                task_end_time = frame_count / video_fps
         task_start_frame_idx = round(video_fps * task_start_time)
         task_end_frame_idx = round(video_fps * task_end_time)
 
