@@ -1,5 +1,5 @@
 // src/pages/HomePage/projects.jsx
-import { useEffect, useState, useRef, useContext } from 'react';
+import { useEffect, useState, useRef, useContext, useCallback } from 'react';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import { Plus, Pencil } from 'lucide-react';
@@ -12,16 +12,22 @@ import JSONUploadDialog from './JSONUploadDialog';
 const BASE_URL = import.meta.env.VITE_BASE_URL;
 dayjs.extend(relativeTime);
 
-const fetchVideos = async (url, maxDelay = 300000) => {
-  let delay = 1000;
-  while (true) {
+// Keep the previous cards visible when navigating back; refresh metadata below.
+let cachedProjects = null;
+
+const fetchVideos = async (url, signal) => {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     try {
-      const res = await fetch(url);
-      if (!res.ok) throw new Error();
-      return await res.json();
-    } catch {
-      await new Promise(res => setTimeout(res, delay));
-      delay = Math.min(delay * 2, maxDelay);
+      const res = await fetch(url, { signal });
+      if (!res.ok) throw new Error(`Server returned ${res.status}`);
+      const data = await res.json();
+      if (!Array.isArray(data)) throw new Error('Invalid project list response');
+      return data;
+    } catch (error) {
+      if (signal.aborted || attempt === 5) throw error;
+      // Startup retries should not leave users waiting minutes between attempts.
+      await new Promise(resolve => setTimeout(resolve, Math.min(500 * 2 ** attempt, 2000)));
+      if (signal.aborted) throw error;
     }
   }
 };
@@ -219,6 +225,8 @@ const VideoTile = ({ video, setVideos }) => {
       <img
         src={`${BASE_URL}${video.metadata.thumbnail_url}?t=${video.metadata.last_edited}`}
         className="rounded-lg w-full aspect-video object-contain cursor-pointer bg-zinc-900"
+        loading="lazy"
+        decoding="async"
         alt={`Thumbnail for ${video.metadata.video_name}`}
         onClick={() => openVideoProject()}
       />
@@ -278,23 +286,41 @@ const VideoTile = ({ video, setVideos }) => {
 
 
 export default function Projects() {
-  const [videos, setVideos] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [videos, updateVideos] = useState(() => cachedProjects);
+  const projectMutations = useRef(0);
+  const setVideos = useCallback(update => {
+    projectMutations.current += 1;
+    updateVideos(update);
+  }, []);
+  const [loading, setLoading] = useState(() => cachedProjects === null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [uploadError, setUploadError] = useState(null);
   const fileInputRef = useRef();
-  const fetchedProjects = useRef(false);
+  const [loadError, setLoadError] = useState(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    if (fetchedProjects.current == false) {
-      fetchVideos(`${BASE_URL}/api/get_video_metadata/`)
-        .then(setVideos)
-        .catch(console.error)
-        .finally(() => setLoading(false));
-    }
-    
-    fetchedProjects.current = true
-  }, []);
+    const controller = new AbortController();
+    const mutationVersion = projectMutations.current;
+    setLoadError(null);
+    fetchVideos(`${BASE_URL}/api/get_video_metadata/`, controller.signal)
+      .then(data => {
+        if (!controller.signal.aborted && projectMutations.current === mutationVersion) {
+          updateVideos(data);
+        }
+      })
+      .catch(error => {
+        if (!controller.signal.aborted) setLoadError(error.message || String(error));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [reloadKey]);
+
+  useEffect(() => {
+    if (videos !== null) cachedProjects = videos;
+  }, [videos]);
 
   useEffect(() => {
     if (videos && videos.length > 0) {
@@ -328,6 +354,15 @@ export default function Projects() {
   };
   return (
     <div>
+      {loadError && (
+        <div role="alert" className="mb-4 rounded border border-red-400 p-3">
+          Could not load projects: {loadError}.
+          <button className="ml-3 underline" onClick={() => {
+            setLoading(videos === null);
+            setReloadKey(value => value + 1);
+          }}>Retry</button>
+        </div>
+      )}
       {loading && !videos && (
         <div className="flex items-center justify-center h-screen">
           <CircularProgress className='my-4' size={64} />
