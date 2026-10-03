@@ -278,6 +278,7 @@ const VideoPlayer = ({
                 }}
                 onPlay={() => setIsPlaying(true)}
                 onPause={() => setIsPlaying(false)}
+                onEnded={() => setIsPlaying(false)}
               />
               <VideoDrawer
                 videoRef={videoRef}

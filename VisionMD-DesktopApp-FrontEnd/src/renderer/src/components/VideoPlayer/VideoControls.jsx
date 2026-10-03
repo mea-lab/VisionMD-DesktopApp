@@ -5,7 +5,7 @@ import Tooltip from '@mui/material/Tooltip';
 
 const VideoControls = ({ videoRef, isPlaying, fps }) => {
 
-  const checkVideoLoaded = () => {
+  const checkVideoLoaded = (minimumReadyState = 4) => {
     const video = videoRef.current;
     if (!video) return false;
     if (video.error) {
@@ -16,14 +16,22 @@ const VideoControls = ({ videoRef, isPlaying, fps }) => {
       console.error('No video source is set.');
       return false;
     }
-    return video.readyState === 4;
+    return video.readyState >= minimumReadyState;
   };
 
   const playOrPause = () => {
-    if (!checkVideoLoaded()) return;
+    // At the end, readyState can fall below HAVE_ENOUGH_DATA. The current
+    // frame is sufficient to seek back and request playback again.
+    if (!checkVideoLoaded(2)) return;
     const video = videoRef.current;
-    if (video.paused) video.play();
-    else video.pause();
+    const atEnd = video.ended || (
+      Number.isFinite(video.duration) && video.duration > 0 &&
+      video.currentTime >= video.duration
+    );
+    if (atEnd) video.currentTime = 0;
+    if (video.paused || atEnd) {
+      video.play().catch(error => console.warn('Could not start video playback:', error));
+    } else video.pause();
   };
 
   const changeVideoTime = (offset) => {
