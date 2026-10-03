@@ -564,8 +564,8 @@ def normalize_video(input_path, add_audio=True):
     Keep the current libx264 quality settings. Compatible zero-based CFR MP4
     streams are left untouched; container/audio-only changes copy video packets.
     Two full frame scans suffice when conversion is needed (source and output).
-    Rotation stays in metadata so the existing player/analysis rotation handling
-    remains responsible for orienting the original sensor pixels.
+    Preserve the previous FFmpeg orientation behavior: encoding autorotates
+    pixels, while stream-copy operations retain the source display metadata.
     """
     source = _normalization_probe(input_path)
     video, audio = source['video'], source['audio']
@@ -573,7 +573,18 @@ def normalize_video(input_path, add_audio=True):
     first_timestamp = probe_first_video_timestamp(input_path)
     retime = (video.get('r_frame_rate') != video.get('avg_frame_rate')
               or abs(first_timestamp) > .001)
-    square_size = _square_pixel_size(video)
+    geometry = dict(video)
+    rotation = next((float(item['rotation']) for item in video.get('side_data_list', [])
+                     if 'rotation' in item), float(video.get('tags', {}).get('rotate', 0)))
+    if abs(rotation) % 180 == 90:
+        # Plan scaling on the pixels produced by the existing FFmpeg autorotation.
+        geometry['width'], geometry['height'] = video['height'], video['width']
+        for key in ('sample_aspect_ratio', 'display_aspect_ratio'):
+            value = video.get(key, '')
+            if ':' in value:
+                a, b = value.split(':')
+                geometry[key] = f'{b}:{a}'
+    square_size = _square_pixel_size(geometry)
     encode_video = (retime or square_size is not None
                     or video.get('codec_name') != 'h264'
                     or video.get('pix_fmt') not in {'yuv420p', 'yuvj420p'}
@@ -593,7 +604,7 @@ def normalize_video(input_path, add_audio=True):
     fd, output = tempfile.mkstemp(prefix='visionmd-normalize-', suffix='.mp4',
                                   dir=os.path.dirname(os.path.abspath(input_path)))
     os.close(fd)
-    cmd = [get_ffmpeg_path(), '-v', 'error', '-y', '-noautorotate', '-i', input_path]
+    cmd = [get_ffmpeg_path(), '-v', 'error', '-y', '-i', input_path]
     if dummy_audio:
         # A finite audio source avoids -shortest truncating the final video frame.
         cmd += ['-f', 'lavfi', '-i',

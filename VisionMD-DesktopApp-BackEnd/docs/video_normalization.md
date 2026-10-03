@@ -9,8 +9,9 @@ retains silent videos without adding an audio track.
 Already compatible zero-based CFR MP4 recordings are not rewritten. When only
 a container or audio change is necessary, video packets are copied. Encoding
 retains the existing libx264 medium/grain/CRF-15 settings. Odd image dimensions
-are padded on the bottom/right to meet yuv420p encoding requirements. Rotation
-metadata is retained, rather than baking a rotation into the sensor pixels.
+are padded on the bottom/right to meet yuv420p encoding requirements. The existing FFmpeg orientation behavior is retained: encoding uses default
+autorotation; stream-copy operations retain source rotation metadata. Player,
+thumbnail, and detector rotation handling are unchanged.
 
 A source metadata/frame-count scan supplies the conversion plan; one output
 scan verifies the result. The output must preserve frame count, start at zero,

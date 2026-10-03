@@ -64,26 +64,41 @@ def test_compatible_mov_remux_and_silent_audio_do_not_encode_video(tmp_path, mon
 
 
 @pytest.mark.parametrize('retime', [False, True])
-def test_rotated_recording_preserves_display_orientation(tmp_path, retime):
+@pytest.mark.parametrize('angle', [90, 180, 270])
+@pytest.mark.parametrize('sar', ['1/1', '5/4'])
+def test_rotated_recording_matches_previous_display_behavior(tmp_path, retime, angle, sar):
     plain = tmp_path / 'plain.mp4'
-    extra = ['-vf', 'setpts=PTS+0.2/TB', '-fps_mode', 'passthrough'] if retime else []
+    vf = f'setsar={sar}' + (',setpts=PTS+0.2/TB' if retime else '')
+    extra = ['-vf', vf, '-fps_mode', 'passthrough']
     generate(plain, '-frames:v', '30', *extra, '-c:v', 'libx264', '-pix_fmt', 'yuv420p')
     source = tmp_path / 'rotated.mov'
     help_text = subprocess.check_output([get_ffmpeg_path(), '-hide_banner', '-h', 'full'],
                                         stderr=subprocess.DEVNULL, text=True)
     if '-display_rotation' in help_text:
-        cmd = [get_ffmpeg_path(), '-v', 'error', '-y', '-display_rotation', '90',
+        cmd = [get_ffmpeg_path(), '-v', 'error', '-y', '-copyts', '-display_rotation', str(angle),
                '-noautorotate', '-i', str(plain), '-c', 'copy', str(source)]
     else:
-        cmd = [get_ffmpeg_path(), '-v', 'error', '-y', '-i', str(plain),
-               '-c', 'copy', '-metadata:s:v:0', 'rotate=90', str(source)]
+        cmd = [get_ffmpeg_path(), '-v', 'error', '-y', '-copyts', '-i', str(plain),
+               '-c', 'copy', '-metadata:s:v:0', f'rotate={angle}', str(source)]
     subprocess.run(cmd, check=True)
+    def displayed_first_frame(path):
+        import numpy as np
+        # FFmpeg's default display orientation is the old conversion behavior.
+        frame = subprocess.check_output([get_ffmpeg_path(), '-v', 'error', '-i', str(path),
+                    '-vf', 'scale=trunc(iw*sar/2)*2:ih,setsar=1',
+                    '-frames:v', '1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'])
+        return np.frombuffer(frame, dtype=np.uint8).astype(float)
     def rotation(path):
         video = module._normalization_probe(str(path))['video']
-        return next(s['rotation'] for s in video['side_data_list'] if 'rotation' in s)
-    before = rotation(source)
+        return next((s['rotation'] for s in video.get('side_data_list', []) if 'rotation' in s), 0)
+    assert (module.probe_first_video_timestamp(str(source)) > .1) == retime
+    before = displayed_first_frame(source)
+    source_rotation = rotation(source)
     output = normalize_video(str(source))
-    assert rotation(output['path']) == before
+    after = displayed_first_frame(output['path'])
+    import numpy as np
+    assert np.mean(np.abs(after - before)) < 5
+    assert rotation(output['path']) == (0 if retime or sar != '1/1' else source_rotation)
     assert output['frame_count'] == 30
 
 
