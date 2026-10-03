@@ -247,7 +247,14 @@ class FingerTapLeftTask(BaseTask):
         }
         missing_percent = sum(1 for x in essential_landmarks if not x) / len(essential_landmarks)
         if missing_percent > 0.1:
-            raise Exception((f"Left hand could not be found in more than 10% of the frames. The video quality may be too low or the video may not be a finger tapping task."))
+            raise Exception(
+                f"Reliable left-hand tracking was unavailable in "
+                f"{sum(not frame for frame in essential_landmarks)} of "
+                f"{len(essential_landmarks)} frames ({missing_percent:.1%}), "
+                "exceeding the 10% limit. This can reflect missed detections, "
+                "uncertain hand labels, or lost hand association. "
+                "Check the task interval and hand bounding box."
+            )
 
         return essential_landmarks, all_landmarks
 

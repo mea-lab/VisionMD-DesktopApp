@@ -44,3 +44,30 @@ def test_left_hand_uses_same_association_and_missing_frames_preserve_anchor():
     assert tracker.select(result(hand(.3, .4, 'Left')), 1000, 1000) == 0
     assert tracker.select(result(), 1000, 1000) is None
     assert tracker.select(result(hand(.301, .4, 'Right')), 1000, 1000) == 0
+
+
+def test_hand_can_be_reacquired_after_raising_during_a_detection_gap():
+    tracker = HandIdentityTracker('Right')
+    tracker.select(result(hand(.3, .5)), 1000, 1000)
+    assert tracker.select(result(), 1000, 1000) is None
+    assert tracker.select(result(), 1000, 1000) is None
+    # Hand travels more than the single-frame gate while detections are absent.
+    assert tracker.select(result(hand(.3, .35), hand(.7, .6, 'Left')), 1000, 1000) == 0
+    assert tracker.missed_frames == 0
+    assert tracker.select(result(hand(.3, .349)), 1000, 1000) == 0
+
+
+def test_repeated_rejections_do_not_permanently_lock_on_old_position():
+    tracker = HandIdentityTracker('Right')
+    tracker.select(result(hand(.3, .5)), 1000, 1000)
+    assert tracker.select(result(hand(.3, .4)), 1000, 1000) is None
+    assert tracker.select(result(hand(.3, .39)), 1000, 1000) == 0
+
+
+def test_gap_gate_is_bounded_and_does_not_admit_distant_other_hand():
+    tracker = HandIdentityTracker('Right')
+    tracker.select(result(hand(.3, .4)), 1000, 1000)
+    for _ in range(30):
+        assert tracker.select(result(), 1000, 1000) is None
+    assert tracker.select(result(hand(.7, .6)), 1000, 1000) is None
+    assert tracker.select(result(hand(.301, .4)), 1000, 1000) == 0
