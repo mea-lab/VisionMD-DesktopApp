@@ -62,7 +62,7 @@ class HandMovementLeftTask(BaseTask):
         self.video_file_name = None
         
         self.task_name = None
-        self.task_norm_strategy = None
+        self.task_norm_strategy = "PALMSIZE"
         self.task_start_time = None
         self.task_start_frame_idx = None
         self.task_end_time = None
@@ -150,7 +150,7 @@ class HandMovementLeftTask(BaseTask):
 
         #  Prepare task data
         task_name = json_data["task_name"]
-        task_norm_strategy = json_data['norm_strategy']
+        task_norm_strategy = json_data.get("norm_strategy") or "PALMSIZE"
         task_start_time = json_data['start_time']
         task_end_time = json_data['end_time']
 
@@ -287,6 +287,7 @@ class HandMovementLeftTask(BaseTask):
         return signal
 
     def calculate_normalization_factor(self, landmarks) -> float:
+        strategy = self.task_norm_strategy or "PALMSIZE"
         LM = HandMovementLeftTask.LANDMARKS
         factors = []
 
@@ -295,7 +296,7 @@ class HandMovementLeftTask(BaseTask):
 
         for frame in landmarks:
             # THUMB
-            if self.task_norm_strategy == 'THUMBSIZE':
+            if strategy == 'THUMBSIZE':
                 if has_idxs(frame, 
                             LM['THUMB_CMC'], LM['THUMB_MCP'], 
                             LM['THUMB_IP'], LM['THUMB_TIP']):
@@ -305,7 +306,7 @@ class HandMovementLeftTask(BaseTask):
                 continue
 
             # PALM
-            if self.task_norm_strategy == 'PALMSIZE':
+            if strategy == 'PALMSIZE':
                 if has_idxs(frame,
                             LM['WRIST'],
                             LM['INDEX_FINGER_MCP'], LM['MIDDLE_FINGER_MCP'],
@@ -318,7 +319,7 @@ class HandMovementLeftTask(BaseTask):
                 continue
             
             # MAX AMPLITUDE
-            if self.task_norm_strategy == 'MAXAMPLITUDE':
+            if strategy == 'MAXAMPLITUDE':
                 if has_idxs(frame, LM['THUMB_TIP'], LM['INDEX_FINGER_TIP']):
                     dist_val = math.dist(frame[LM['THUMB_TIP']], frame[LM['INDEX_FINGER_TIP']])
                     factors.append(dist_val)

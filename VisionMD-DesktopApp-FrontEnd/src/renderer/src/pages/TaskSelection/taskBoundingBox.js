@@ -26,6 +26,15 @@ function detectedTaskBox(task, boundingBoxes, fps) {
 
 export function patchTask(task, patch, boundingBoxes, fps) {
   const merged = { ...task, ...patch };
+  // A new task type gets its own default, rather than inheriting the previous
+  // type's normalization. Explicit choices on the same task remain intact.
+  if (merged.name !== task.name && !patch.norm_strategy) {
+    if (['Hand Movement Left', 'Hand Movement Right'].includes(merged.name)) {
+      merged.norm_strategy = 'PALMSIZE';
+    } else if (['Finger Tap Left', 'Finger Tap Right'].includes(merged.name)) {
+      merged.norm_strategy = 'INDEXSIZE';
+    }
+  }
   const windowChanged = merged.start !== task.start || merged.end !== task.end;
   if (windowChanged && !merged.box_manual) {
     return detectedTaskBox(merged, boundingBoxes, fps);
