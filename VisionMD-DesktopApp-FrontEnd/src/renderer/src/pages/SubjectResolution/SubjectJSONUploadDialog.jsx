@@ -11,10 +11,13 @@ import Input from '@mui/material/Input';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
+import { useTheme } from '../../contexts/ThemeContext';
 
 import { VideoContext } from '@/contexts/VideoContext';
 
 export default function JSONUploadDialog({ dialogOpen, setDialogOpen, handleJSONUpload }) {
+  const { theme } = useTheme();
+  const isLight = theme === 'light';
   const [fileName, setFileName] = useState('');
   const [fileError, setFileError] = useState('');
   const [jsonContent, setJSONContent] = useState(null);
@@ -40,12 +43,10 @@ export default function JSONUploadDialog({ dialogOpen, setDialogOpen, handleJSON
 
   const getVideoData = async () => {
     setServerProcessing(true);
-    const videoURL = videoRef.current.src;
-    const blob = await fetch(videoURL).then(r => r.blob());
-    await fetchBoundingBoxes(blob);
+    await fetchBoundingBoxes();
   };
 
-  const fetchBoundingBoxes = async (content) => {
+  const fetchBoundingBoxes = async () => {
     try {
       const response = await fetch(`http://localhost:8000/api/get_bounding_boxes/?id=${videoId}`, {
         method: 'GET',
@@ -55,7 +56,7 @@ export default function JSONUploadDialog({ dialogOpen, setDialogOpen, handleJSON
       }
       const data = await response.json();
       console.log("Returned subject resolution data",data)
-      handleJSONUpload(true, data);
+      handleJSONUpload(true, data, true);
       setDialogOpen(false);
     } catch (error) {
       console.error('Failed to fetch projects:', error);
@@ -143,7 +144,8 @@ export default function JSONUploadDialog({ dialogOpen, setDialogOpen, handleJSON
       onClose={handleClose}
       PaperProps={{
         sx: {
-          backgroundColor: '#333338',
+          backgroundColor: isLight ? '#ffffff' : '#333338',
+          color: isLight ? '#18181b' : '#f4f4f5',
           borderRadius: 3,
           minWidth: 400,
         },
@@ -203,7 +205,7 @@ export default function JSONUploadDialog({ dialogOpen, setDialogOpen, handleJSON
             >
               Process with JSON
             </button>
-            <button className='rounded-md bg-[#1976d2] hover:bg-[#1565c0] p-1.5 text-gray-100' onClick={handleAutoProcess} disabled={serverProcessing}>
+            <button data-shortcut-action="auto-process" className='rounded-md bg-[#1976d2] hover:bg-[#1565c0] p-1.5 text-gray-100' onClick={handleAutoProcess} disabled={serverProcessing}>
               Auto-Process
             </button>
           </div>

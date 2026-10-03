@@ -1,4 +1,5 @@
 //src/pages/TaskSelection/index.jsx
+import { initializeTaskBox, patchTask } from './taskBoundingBox';
 import VideoPlayer from '../../components/VideoPlayer/VideoPlayer';
 import HeaderSection from './HeaderSection';
 import { useEffect, useRef, useState } from 'react';
@@ -18,7 +19,7 @@ const TaskSelection = () => {
     videoURL, setVideoURL,
     fileName, setFileName,
     boundingBoxes, setBoundingBoxes,
-    fps, setFPS,
+    fps, setFPS, frameCount,
     tasks, setTasks, 
     tasksReady, setTasksReady,
     taskTypeData, setTaskTypeData
@@ -31,41 +32,7 @@ const TaskSelection = () => {
     }
   },[])
 
-  const updateTaskWithBox = task => {
-    const startFrame = Math.ceil(task.start * fps);
-    const endFrame = Math.floor(task.end * fps);
-
-    const regionBoxes = boundingBoxes
-      .filter(({ frameNumber }) => frameNumber >= startFrame && frameNumber <= endFrame)
-      .map(({ frameNumber, data }) => ({
-        frameNumber,
-        data: data.filter(item => item.Subject === true)
-      }))
-      .filter(({ data }) => data.length > 0);
-
-    let minX = Infinity,
-      minY = Infinity,
-      maxX = -Infinity,
-      maxY = -Infinity;
-
-    regionBoxes.forEach(box => {
-      box.data.forEach(({ x, y, width, height }) => {
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x + width);
-        maxY = Math.max(maxY, y + height);
-      });
-    });
-
-    return {
-      ...task,
-      x: minX,
-      y: minY,
-      box_width: maxX - minX,
-      box_height: maxY - minY,
-    };
-  };
-
+  const updateTaskWithBox = task => initializeTaskBox(task, boundingBoxes, fps);
 
   const onTaskCreate = newTask => {
     console.log("onTaskCreate running", newTask)
@@ -76,8 +43,7 @@ const TaskSelection = () => {
     setTasks(prev =>
       prev.map(t => {
         if (t.id !== patch.id) return t;
-        const merged = { ...t, ...patch };
-        return { ...updateTaskWithBox(merged) };
+        return patchTask(t, patch, boundingBoxes, fps);
       })
     );
   };
@@ -85,6 +51,10 @@ const TaskSelection = () => {
   const onTaskDelete = deletedTask => {
     const newTasks = tasks.filter(task => task.id !== deletedTask.id);
     setTasks(newTasks);
+  };
+
+  const replaceTasksFromWaveform = replacementTasks => {
+    setTasks(replacementTasks.map(updateTaskWithBox));
   };
 
   const resetTaskSelection = () => {
@@ -107,6 +77,7 @@ const TaskSelection = () => {
             videoRef={videoRef}
             boundingBoxes={boundingBoxes}
             fps={fps}
+            frameCount={frameCount}
             persons={persons}
             setVideoReady={setVideoReady}
             setVideoData={setVideoData}
@@ -123,7 +94,9 @@ const TaskSelection = () => {
             isVideoReady={videoReady}
             fileName={fileName}
             fps={fps}
+            frameCount={frameCount}
             boundingBoxes={boundingBoxes}
+            persons={persons}
             tasks={tasks}
             moveToNextScreen={moveToNextScreen}
           />
@@ -132,6 +105,7 @@ const TaskSelection = () => {
             setTasks={setTasks}
             onTaskCreate={onTaskCreate}
             onTaskChange={onTaskChange}
+            onTasksReplace={replaceTasksFromWaveform}
             fps={fps}
             videoRef={videoRef}
             isVideoReady={videoReady}

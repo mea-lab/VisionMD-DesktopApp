@@ -53,6 +53,8 @@ def get_bounding_boxes(request):
     if not os.path.isfile(video_path):
         return Response("Video file in project folder does not exist.", status=400)
 
+    bounding_boxes_path = os.path.join(project_folder_path, "boundingBoxes.json")
+
     # Do YOLO stuff here
     try:
         print("Analysis started")
@@ -62,7 +64,7 @@ def get_bounding_boxes(request):
 
         # 1) Build path to YOLO model
         current_dir = os.path.dirname(__file__)
-        pathtomodel = os.path.join(current_dir, '../analysis/models/yolov8n.pt')
+        pathtomodel = os.path.join(current_dir, '../analysis/models/yolo11n-pose.pt')
 
         # 2) Run YOLO-based tracker
         result = yolo_tracker(video_path, rotation, pathtomodel, device='')
@@ -71,9 +73,7 @@ def get_bounding_boxes(request):
 
         # 3) Dump bounding boxes to json
         bounding_boxes_path = os.path.join(project_folder_path, 'boundingBoxes.json')
-        bounding_boxes_wrapped = {
-            "boundingBoxes": result['boundingBoxes']
-        }
+        bounding_boxes_wrapped = result
 
         with open(bounding_boxes_path, 'w') as jf:
             json.dump(bounding_boxes_wrapped, jf, indent=4)

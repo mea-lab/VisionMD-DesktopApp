@@ -1,5 +1,6 @@
 // src/components/VideoPlayer/VideoDrawer.jsx
 import React, { useEffect, useRef, useCallback } from 'react';
+import { landmarkDisplayColor } from './landmarkColor';
 
 const VideoDrawer = ({
   videoRef,
@@ -7,7 +8,6 @@ const VideoDrawer = ({
   fps,
   persons,
   tasks,
-  landMarks,
   selectedTask,
   style,
   displayWidth,
@@ -115,15 +115,18 @@ const VideoDrawer = ({
     }
   }, [boundingBoxes, persons]);
 
-  const drawLandMarks = useCallback((scaleRatio) => {
+  const drawLandMarks = useCallback((scaleRatio, mediaTime) => {
     if (!tasks.length || selectedTask == null) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
     const currentTask = tasks[selectedTask];
-    const startFrame = Math.round(currentTask.start * fps);
-    const frameIndex = currentFrame.current - startFrame;
+    const landMarks = currentTask?.data?.landMarks;
+    const landmarkFps = currentTask.data?.landmark_fps ?? fps;
+    const startFrame = currentTask.data?.landmark_start_frame
+      ?? Math.round(currentTask.start * landmarkFps);
+    const frameIndex = Math.round(mediaTime * landmarkFps) - startFrame;
     if (
       frameIndex < 0 ||
       !landMarks ||
@@ -131,8 +134,6 @@ const VideoDrawer = ({
     ) return;
 
     const joints2D = landMarks[frameIndex];
-    const colors3D = landmark_colors;
-
     // pre‐compute the crop offset
     if (canvas.width === 0 || canvas.height === 0) return;
     const radiusPx = 5 / scaleRatio
@@ -140,21 +141,13 @@ const VideoDrawer = ({
     joints2D.forEach((pt, j) => {
       if (!pt || pt.length < 2) return;
       const [lx, ly] = pt;
-      let fill = 'red';
-      if (
-        Array.isArray(colors3D) &&
-        colors3D[frameIndex] &&
-        Array.isArray(colors3D[frameIndex][j])
-      ) {
-        const [r, g, b] = colors3D[frameIndex][j];
-        fill = `rgb(${r}, ${g}, ${b})`;
-      }
+      const fill = landmarkDisplayColor(landmark_colors, frameIndex, j);
       ctx.fillStyle = fill;
       ctx.beginPath();
       ctx.arc(lx , ly , radiusPx, 0, 2 * Math.PI);
       ctx.fill();
     });
-  }, [tasks, selectedTask, fps, landMarks, landmark_colors, displayWidth, displayHeight]);
+  }, [tasks, selectedTask, fps, landmark_colors]);
 
 
   // Modified drawFrame: we only draw bounding boxes when not in a taskBox time interval.
@@ -166,9 +159,10 @@ const VideoDrawer = ({
       lastDrawnFrame.current = frameNumber;
       currentFrame.current = frameNumber;
 
-      // Clear canvas and draw the current video frame as background.
+      // The native video element renders the pixels. This canvas is only an
+      // overlay; copying video frames through canvas caused stale/frozen frames
+      // in Chromium for some valid H.264 files.
       clearCanvas();
-      drawVideoFrame();
 
       // Check if currentTime is within any taskBox's time window.
       const inTaskTime = tasks.some((task) => currentTime >= task.start && currentTime <= task.end);
@@ -186,10 +180,10 @@ const VideoDrawer = ({
       }
 
       if (screen === 'taskDetails' && isPlaying) {
-        drawLandMarks(scaleRatio);
+        drawLandMarks(scaleRatio, currentTime);
       }
     },
-    [getFrameNumber, clearCanvas, drawVideoFrame, drawBoundingBoxes, drawLandMarks, landmark_colors, tasks, screen, isPlaying, zoomLevel]
+    [getFrameNumber, clearCanvas, drawBoundingBoxes, drawLandMarks, landmark_colors, tasks, screen, isPlaying, zoomLevel]
   );
 
   // Set canvas dimensions and start the continuous render loop.
@@ -212,13 +206,18 @@ const VideoDrawer = ({
     }
   
     let frameCallbackId;
+    let cancelled = false;
     const render = (now, metadata) => {
+      if (cancelled) return;
       drawFrame(metadata.mediaTime);
-      frameCallbackId = video.requestVideoFrameCallback(render);
+      if (!cancelled) {
+        frameCallbackId = video.requestVideoFrameCallback(render);
+      }
     };
   
     frameCallbackId = video.requestVideoFrameCallback(render);  
     return () => {
+      cancelled = true;
       video.removeEventListener('loadedmetadata', setCanvasDimensions);
       if (video.cancelVideoFrameCallback) {
         video.cancelVideoFrameCallback(frameCallbackId);
@@ -231,7 +230,7 @@ const VideoDrawer = ({
     if (videoRef?.current) {
       drawFrame(videoRef.current.currentTime);
     }
-  }, [persons, tasks, landMarks, landmark_colors, selectedTask, screen, drawFrame, videoRef, isPlaying]);
+  }, [persons, tasks, landmark_colors, selectedTask, screen, drawFrame, videoRef, isPlaying]);
   
   return (
     <canvas

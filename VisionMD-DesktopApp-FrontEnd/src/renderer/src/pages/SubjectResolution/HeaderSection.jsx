@@ -53,6 +53,7 @@ const HeaderSection = ({
           title="Go Back"
         >
         <NavigateBefore
+          data-shortcut-action="back"
           onClick={() => navigate('/')}
           className="cursor-pointer text-white hover:text-gray-300"
           fontSize="medium"
@@ -75,6 +76,7 @@ const HeaderSection = ({
           title="Go Forward"
         >
         <NavigateNext
+          data-shortcut-action="forward"
           onClick={notProceed ? undefined : moveToNextScreen}
           className={`cursor-pointer ${notProceed ? 'text-gray-500 cursor-not-allowed' : 'text-white hover:text-gray-300'}`}
           fontSize="medium"

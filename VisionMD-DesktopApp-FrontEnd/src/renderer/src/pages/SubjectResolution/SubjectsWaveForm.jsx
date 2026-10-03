@@ -7,6 +7,7 @@ import Slider from '@mui/material/Slider';
 const SubjectsWaveForm = ({ videoRef, isVideoReady }) => {
   const waveformRef = useRef(null);
   const waveSurfer = useRef(null);
+  const previewMediaRef = useRef(null);
   const [loadPercent, setLoadPercent] = useState(0);
   const [waveLoading, setWaveLoading] = useState(false);
   
@@ -30,8 +31,8 @@ const SubjectsWaveForm = ({ videoRef, isVideoReady }) => {
       responsive: true,
       height: 100,
       backend: 'MediaElement',
-      media: videoRef.current,
-      mediaType: 'video',
+      media: previewMediaRef.current,
+      mediaType: 'audio',
       normalize: true,
       zoom: true,
       scrollParent: true,
@@ -53,6 +54,13 @@ const SubjectsWaveForm = ({ videoRef, isVideoReady }) => {
       waveSurfer.current.destroy();
     }
 
+    // WaveSurfer must not own the application's review <video>.  Sharing that
+    // element causes its reported duration to change while waveform decoding
+    // progresses, which in turn changes VisionMD's frame count and breaks the
+    // frame-to-box/landmark mapping.
+    const previewMedia = new Audio(videoRef.current.currentSrc || videoRef.current.src);
+    previewMedia.muted = true;
+    previewMediaRef.current = previewMedia;
     waveSurfer.current = WaveSurfer.create(getWaveSurferOptions());
     waveSurfer.current.registerPlugin(
       HoverPlugin.create({
@@ -70,8 +78,30 @@ const SubjectsWaveForm = ({ videoRef, isVideoReady }) => {
       setInitialZoom();  // Ensure initial zoom level after waveform is ready
     });
 
+    waveSurfer.current.on('interaction', time => {
+      if (videoRef.current) videoRef.current.currentTime = time;
+    });
+
+    // The waveform uses its own media element so decoding it cannot mutate
+    // the review video's media state.  Explicitly mirror review playback so
+    // the progress fill/cursor still follows the visible video.
+    const syncWaveformToVideo = () => {
+      const video = videoRef.current;
+      const ws = waveSurfer.current;
+      if (!video || !ws || !Number.isFinite(video.currentTime)) return;
+      ws.setTime(video.currentTime);
+    };
+    videoRef.current.addEventListener('timeupdate', syncWaveformToVideo);
+    videoRef.current.addEventListener('seeked', syncWaveformToVideo);
+
     return () => {
+      videoRef.current?.removeEventListener('timeupdate', syncWaveformToVideo);
+      videoRef.current?.removeEventListener('seeked', syncWaveformToVideo);
       waveSurfer.current?.destroy();
+      previewMedia.pause();
+      previewMedia.removeAttribute('src');
+      previewMedia.load();
+      previewMediaRef.current = null;
     };
   }, [isVideoReady, videoRef]);
 

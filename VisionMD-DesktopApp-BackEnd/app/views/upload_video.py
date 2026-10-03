@@ -11,6 +11,7 @@ import subprocess
 import shutil
 import os, sys
 import traceback
+from functools import lru_cache
 
 def get_ffmpeg_path():
     if getattr(sys, 'frozen', False):
@@ -22,9 +23,56 @@ def get_ffmpeg_path():
             raise FileNotFoundError("ffmpeg not found in PATH")
         return ffmpeg_path
 
+def get_ffprobe_path():
+    """Return the ffprobe paired with VisionMD's ffmpeg binary."""
+    ffmpeg_path = get_ffmpeg_path()
+    return os.path.join(os.path.dirname(ffmpeg_path), "ffprobe")
+
+def probe_decoded_video_timing(input_path):
+    """Count decoded frames and obtain their presentation duration.
+
+    Container ``nb_frames`` and OpenCV's nominal FPS are frequently wrong for
+    phone VFR recordings. ``-count_frames`` asks the decoder for the quantity
+    VisionMD actually needs and lets CFR normalization preserve every frame.
+    """
+    cmd = [
+        get_ffprobe_path(), "-v", "error", "-count_frames",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=nb_read_frames,duration:format=duration",
+        "-of", "json", input_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFprobe frame count failed:\n{result.stderr}")
+    data = json.loads(result.stdout)
+    if not data.get("streams"):
+        raise RuntimeError("FFprobe frame count returned no video stream.")
+    stream = data["streams"][0]
+    frame_count = int(stream.get("nb_read_frames") or 0)
+    duration = float(stream.get("duration") or data.get("format", {}).get("duration") or 0)
+    if frame_count < 1 or duration <= 0:
+        raise RuntimeError("FFprobe could not determine decoded frame timing.")
+    return frame_count, duration
+
+def probe_first_video_timestamp(input_path):
+    """Return the presentation timestamp of the first decoded video frame."""
+    cmd = [
+        get_ffprobe_path(), "-v", "error", "-select_streams", "v:0",
+        "-read_intervals", "%+#1",
+        "-show_entries", "frame=best_effort_timestamp_time",
+        "-of", "json", input_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFprobe timestamp check failed:\n{result.stderr}")
+    frames = json.loads(result.stdout).get("frames") or []
+    if not frames or frames[0].get("best_effort_timestamp_time") is None:
+        raise RuntimeError("FFprobe returned no decoded video timestamp.")
+    return float(frames[0]["best_effort_timestamp_time"])
+
 def is_vfr(input_path):
     ffmpeg_path = get_ffmpeg_path()
-    ffmprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
+    ffmprobe_path = get_ffprobe_path()
     print(f"Chosen ffmpeg binary path for ffmprobing video: {ffmprobe_path}")
     cmd = [
         ffmprobe_path,
@@ -51,24 +99,39 @@ def is_vfr(input_path):
 
 def convert_to_cfr(input_path, fps):
     print("Running conversion to cfr...")
-    if not is_vfr(input_path):
-        print("Video is CFR already, skipping conversion.")
+    first_timestamp = probe_first_video_timestamp(input_path)
+    if not is_vfr(input_path) and abs(first_timestamp) <= 0.001:
+        print("Video is already zero-based CFR, skipping conversion.")
         return
+    if abs(first_timestamp) > 0.001:
+        print(f"Rebasing first video timestamp from {first_timestamp:.6f}s to zero.")
 
     base, ext = os.path.splitext(input_path)
     ffmpeg_path = get_ffmpeg_path()
     output_path = f"{base}_cfr{ext}"
     print(f"Chosen ffmpeg binary path for VFR to CFR conversion: {ffmpeg_path}")
 
-    vf_parts = [f"fps={fps}"]
-    vf_value = ",".join(vf_parts)
+    # Preserve the source's decoded frame count. OpenCV often reports a nominal
+    # 29.97 FPS for VFR phone video even when the presentation timestamps imply
+    # a different effective rate; forcing that nominal value drops frames.
+    source_frame_count, source_duration = probe_decoded_video_timing(input_path)
+    fps = source_frame_count / source_duration
+    # Assign uniform timestamps without duplicating or dropping observations.
+    # One tick per frame avoids the source's coarse or irregular clock.
+    rate = f"{fps:.12f}"
+    vf_value = f"settb=expr=1/({rate}),setpts=N"
 
     cmd = [
         f'{ffmpeg_path}', '-y',
         '-i', input_path,
         '-vf', vf_value,
-        '-vsync', 'cfr',
+        # Encoder rate is explicit; synchronization must not resample frames.
+        '-enc_time_base', 'filter',
+        '-fps_mode', 'passthrough',
         '-c:v', 'libx264',
+        '-preset', 'medium',
+        '-tune', 'grain',
+        '-crf', '15',
         '-pix_fmt', 'yuv420p',
         '-c:a', 'copy',
         output_path
@@ -84,13 +147,24 @@ def convert_to_cfr(input_path, fps):
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg CFR conversion failed:\n{result.stderr.decode('utf-8')}")
     
-    os.remove(input_path)
-    os.rename(output_path, input_path)
+    converted_count, _ = probe_decoded_video_timing(output_path)
+    if converted_count != source_frame_count:
+        raise RuntimeError(
+            f"CFR normalization changed decoded frames from {source_frame_count} "
+            f"to {converted_count}; source file was preserved."
+        )
+    converted_start = probe_first_video_timestamp(output_path)
+    if abs(converted_start) > 0.001:
+        raise RuntimeError(
+            "CFR normalization did not produce zero-based video timestamps "
+            f"(first frame is {converted_start:.6f}s); source file was preserved."
+        )
+    os.replace(output_path, input_path)
 
 def convert_to_square_pixels(input_path):
     print("Running conversion to square pixels...")
     ffmpeg_path = get_ffmpeg_path()
-    ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
+    ffprobe_path = get_ffprobe_path()
     cmd = [
         ffprobe_path,
         "-v", "error",
@@ -160,7 +234,11 @@ def convert_to_square_pixels(input_path):
         "-i", input_path,
         "-vf", vf_filter,
         "-c:v", "libx264",
+        "-preset", "medium",
+        "-tune", "grain",
+        "-crf", "15",
         "-pix_fmt", "yuv420p",
+        "-fps_mode", "passthrough",
         "-c:a", "copy",
         output_path
     ]
@@ -180,7 +258,7 @@ def convert_to_square_pixels(input_path):
 def convert_to_h264_aac(input_path):
     print("Running conversion to h264 aac encoding...")
     ffmpeg_path = get_ffmpeg_path()
-    ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
+    ffprobe_path = get_ffprobe_path()
 
     probe_cmd = [
         ffprobe_path,
@@ -221,7 +299,11 @@ def convert_to_h264_aac(input_path):
         f"{ffmpeg_path}", "-y",
         "-i", input_path,
         "-c:v", "libx264",
+        "-preset", "medium",
+        "-tune", "grain",
+        "-crf", "15",
         "-pix_fmt", "yuv420p",
+        "-fps_mode", "passthrough",
         "-profile:v", "main",
         "-level", "4.0",
         "-c:a", "aac",
@@ -273,7 +355,7 @@ def convert_to_mp4(input_path):
     print("Running conversion to mp4...")
 
     ffmpeg_path = get_ffmpeg_path()
-    ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
+    ffprobe_path = get_ffprobe_path()
 
     if not os.path.exists(input_path):
         raise RuntimeError(f"Input video file does not exist: {input_path}")
@@ -288,15 +370,15 @@ def convert_to_mp4(input_path):
     else:
         output_path = target_path
 
+    # Earlier upload steps guarantee H.264/yuv420p video and AAC audio.
+    # A container change must be lossless: re-encoding here used to compress
+    # every non-MP4 upload twice and visibly softened fingertip detail.
     cmd = [
         f"{ffmpeg_path}", "-y",
         "-i", input_path,
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        "-profile:v", "main",
-        "-level", "4.0",
-        "-c:a", "aac",
-        "-b:a", "128k",
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
+        "-c", "copy",
         "-movflags", "+faststart",
         output_path,
     ]
@@ -362,7 +444,7 @@ def convert_to_mp4(input_path):
 
 def add_dummy_audio_if_missing(video_path):
     ffmpeg_path = get_ffmpeg_path()
-    ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
+    ffprobe_path = get_ffprobe_path()
 
     probe_cmd = [
         ffprobe_path,
@@ -431,6 +513,170 @@ def get_rotation(path):
     return 0
 
 
+@lru_cache(maxsize=4)
+def _supports_strip_fps(ffmpeg_path):
+    result = subprocess.run([ffmpeg_path, '-hide_banner', '-h', 'filter=setpts'],
+                            capture_output=True, text=True,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    return result.returncode == 0 and 'strip_fps' in result.stdout
+
+
+def _normalization_probe(input_path):
+    """Read normalization metadata and count frames in one decode pass."""
+    cmd = [get_ffprobe_path(), '-v', 'error', '-count_frames',
+           '-show_streams', '-show_format', '-of', 'json', input_path]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(f"FFprobe normalization check failed:\n{result.stderr}")
+    data = json.loads(result.stdout)
+    video = next((s for s in data.get('streams', []) if s.get('codec_type') == 'video'), None)
+    if video is None:
+        raise RuntimeError('Input has no video stream.')
+    count = int(video.get('nb_read_frames') or 0)
+    duration = float(video.get('duration') or data.get('format', {}).get('duration') or 0)
+    if count < 1 or not duration > 0:
+        raise RuntimeError('Could not determine decoded video frame timing.')
+    audio = next((s for s in data.get('streams', []) if s.get('codec_type') == 'audio'), None)
+    return {'video': video, 'audio': audio, 'frame_count': count, 'duration': duration}
+
+
+def _square_pixel_size(video):
+    width, height = int(video['width']), int(video['height'])
+    def ratio(value):
+        try:
+            a, b = value.split(':')
+            return float(a) / float(b)
+        except (AttributeError, ValueError, ZeroDivisionError):
+            return None
+    sar = ratio(video.get('sample_aspect_ratio'))
+    dar = ratio(video.get('display_aspect_ratio'))
+    if sar is None:
+        sar = dar * height / width if dar else 1.0
+    if abs(sar - 1.0) < .001:
+        return None
+    target_width = max(2, int(round(width * sar)))
+    return target_width + target_width % 2, height
+
+
+def normalize_video(input_path, add_audio=True):
+    """Normalize in at most one FFmpeg pass, preserving decoded video frames.
+
+    Keep the current libx264 quality settings. Compatible zero-based CFR MP4
+    streams are left untouched; container/audio-only changes copy video packets.
+    Two full frame scans suffice when conversion is needed (source and output).
+    Preserve the previous FFmpeg orientation behavior: encoding autorotates
+    pixels, while stream-copy operations retain the source display metadata.
+    """
+    source = _normalization_probe(input_path)
+    video, audio = source['video'], source['audio']
+    count, duration = source['frame_count'], source['duration']
+    first_timestamp = probe_first_video_timestamp(input_path)
+    retime = (video.get('r_frame_rate') != video.get('avg_frame_rate')
+              or abs(first_timestamp) > .001)
+    geometry = dict(video)
+    rotation = next((float(item['rotation']) for item in video.get('side_data_list', [])
+                     if 'rotation' in item), float(video.get('tags', {}).get('rotate', 0)))
+    if abs(rotation) % 180 == 90:
+        # Plan scaling on the pixels produced by the existing FFmpeg autorotation.
+        geometry['width'], geometry['height'] = video['height'], video['width']
+        for key in ('sample_aspect_ratio', 'display_aspect_ratio'):
+            value = video.get(key, '')
+            if ':' in value:
+                a, b = value.split(':')
+                geometry[key] = f'{b}:{a}'
+    square_size = _square_pixel_size(geometry)
+    encode_video = (retime or square_size is not None
+                    or video.get('codec_name') != 'h264'
+                    or video.get('pix_fmt') not in {'yuv420p', 'yuvj420p'}
+                    or int(video['width']) % 2 or int(video['height']) % 2)
+    encode_audio = audio is not None and (audio.get('codec_name') != 'aac'
+                                        or abs(first_timestamp) > .001)
+    dummy_audio = audio is None and add_audio
+    base, ext = os.path.splitext(input_path)
+    summary = {'path': input_path, 'source_frame_count': count,
+               'source_duration': duration, 'frame_count': count, 'duration': duration}
+    if not (encode_video or encode_audio or dummy_audio) and ext.lower() == '.mp4':
+        return summary
+
+    # Write a separate file and verify before touching the source.
+    target = f'{base}.mp4'
+    import tempfile
+    fd, output = tempfile.mkstemp(prefix='visionmd-normalize-', suffix='.mp4',
+                                  dir=os.path.dirname(os.path.abspath(input_path)))
+    os.close(fd)
+    cmd = [get_ffmpeg_path(), '-v', 'error', '-y', '-i', input_path]
+    if dummy_audio:
+        # A finite audio source avoids -shortest truncating the final video frame.
+        cmd += ['-f', 'lavfi', '-i',
+                f'anullsrc=channel_layout=stereo:sample_rate=48000:d={duration:.12f}']
+    cmd += ['-map', '0:v:0']
+    if dummy_audio:
+        cmd += ['-map', '1:a:0']
+    elif audio is not None:
+        cmd += ['-map', '0:a:0']
+    filters = []
+    strip_fps = False
+    if retime:
+        rate = f'{count / duration:.12f}'
+        # Assign one exact tick per source frame and remove obsolete source
+        # frame-duration metadata before CFR synchronization.
+        strip_fps = _supports_strip_fps(cmd[0])
+        pts_filter = 'setpts=N:strip_fps=1' if strip_fps else 'setpts=N'
+        filters += [f'settb=expr=1/({rate})', pts_filter]
+    if square_size is not None:
+        filters += [f'scale={square_size[0]}:{square_size[1]}', 'setsar=1']
+    if int(video['width']) % 2 or int(video['height']) % 2:
+        filters += ['pad=ceil(iw/2)*2:ceil(ih/2)*2']
+    if encode_video:
+        if filters:
+            cmd += ['-vf', ','.join(filters)]
+        if retime:
+            cmd += ['-enc_time_base', 'filter']
+            if strip_fps:
+                cmd += ['-r', rate]
+            # Older builds cannot clear inherited frame durations: passthrough
+            # preserves each observation, rather than resampling those durations.
+        cmd += ['-fps_mode', 'cfr' if retime and strip_fps else 'passthrough', '-c:v', 'libx264',
+                '-preset', 'medium', '-tune', 'grain', '-crf', '15',
+                '-pix_fmt', 'yuv420p']
+    else:
+        cmd += ['-c:v', 'copy']
+    if audio is not None or dummy_audio:
+        cmd += ['-c:a', 'aac' if encode_audio or dummy_audio else 'copy']
+        if encode_audio or dummy_audio:
+            cmd += ['-b:a', '128k']
+        if encode_audio and abs(first_timestamp) > .001:
+            cmd += ['-af', 'asetpts=PTS-STARTPTS']
+    cmd += ['-movflags', '+faststart', output]
+    try:
+        result = subprocess.run(cmd, capture_output=True,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if result.returncode:
+            raise RuntimeError(f"FFmpeg normalization failed:\n{result.stderr.decode('utf-8', errors='replace')}")
+        normalized = _normalization_probe(output)
+        if normalized['frame_count'] != count:
+            raise RuntimeError(f"Normalization changed decoded frames from {count} "
+                               f"to {normalized['frame_count']}; source file was preserved.")
+        if abs(probe_first_video_timestamp(output)) > .001:
+            raise RuntimeError('Normalization did not produce zero-based video timestamps; source file was preserved.')
+        if abs(normalized['duration'] - duration) >= duration / count:
+            raise RuntimeError('Normalization changed video duration by at least one frame; source file was preserved.')
+        if _square_pixel_size(normalized['video']) is not None:
+            raise RuntimeError('Normalization did not produce square pixels; source file was preserved.')
+        if normalized['video'].get('codec_name') != 'h264':
+            raise RuntimeError('Normalization did not produce H.264 video; source file was preserved.')
+        if add_audio and (normalized['audio'] is None or normalized['audio'].get('codec_name') != 'aac'):
+            raise RuntimeError('Normalization did not produce AAC audio; source file was preserved.')
+        os.replace(output, target)
+        if os.path.abspath(input_path) != os.path.abspath(target):
+            os.remove(input_path)
+        summary.update(path=target, duration=normalized['duration'])
+        return summary
+    finally:
+        if os.path.exists(output):
+            os.remove(output)
+
+
 @api_view(['POST'])
 def upload_video(request):
     try:
@@ -493,17 +739,26 @@ def upload_video(request):
         if not fps or fps <= 0:
             raise RuntimeError(f"Invalid FPS detected: {fps}")
 
-        convert_to_cfr(saved_video_path, fps)
-        convert_to_square_pixels(saved_video_path)
-        saved_video_path = add_dummy_audio_if_missing(saved_video_path)
-        saved_video_path = convert_to_h264_aac(saved_video_path)
-        saved_video_path = convert_to_mp4(saved_video_path)
+        # Capture the source's decoded video frames before any normalization.
+        # This is the invariant that matters; nominal FPS and container
+        # ``nb_frames`` fields are not reliable for VFR phone recordings.
+        normalized = normalize_video(saved_video_path)
+        saved_video_path = normalized['path']
+        source_frame_count = normalized['source_frame_count']
+        source_duration = normalized['source_duration']
         original_filename = os.path.basename(saved_video_path)
         file_type = os.path.splitext(original_filename)[1].lstrip('.')
         cap2 = cv2.VideoCapture(saved_video_path)
         ret, frame = cap2.read()
-        fps = cap2.get(cv2.CAP_PROP_FPS)
         cap2.release()
+        frame_count, decoded_duration = normalized["frame_count"], normalized["duration"]
+        fps = frame_count / decoded_duration
+        if frame_count != source_frame_count:
+            raise RuntimeError(
+                "Video normalization changed the decoded frame count "
+                f"from {source_frame_count} to {frame_count}. The upload was "
+                "stopped rather than saving an incomplete working video."
+            )
         if not ret or frame is None:
             raise RuntimeError("Failed to read a frame after normalization.")
         if not fps or fps <= 0:
@@ -537,6 +792,9 @@ def upload_video(request):
             "stem_name": stem_name,
             "file_type": file_type,
             "fps": fps,
+            "frame_count": frame_count,
+            "source_frame_count": source_frame_count,
+            "source_duration": source_duration,
             "thumbnail_url": thumbnail_url,
             "video_url": video_url,
             "rotation": rotation,

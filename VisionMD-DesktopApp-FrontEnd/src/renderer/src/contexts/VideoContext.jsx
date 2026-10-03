@@ -16,6 +16,7 @@ export const VideoProvider = ({ children }) => {
     const [videoURL, setVideoURL] = useState("");
     const [fileName, setFileName] = useState("");
     const [fps, setFPS] = useState(null);
+    const [frameCount, setFrameCount] = useState(null);
 
     const [persons, setPersons] = useState([]);
     const [boundingBoxes, setBoundingBoxes] = useState([]);
@@ -62,9 +63,17 @@ export const VideoProvider = ({ children }) => {
                 const metadata = data.metadata;
                 
                 // Setting metadata and info 
-                setVideoURL(`${BASE_URL}${metadata.video_url}`);
+                // Project ids and filenames can be reused after a project is
+                // deleted.  A bare media URL can therefore make the browser
+                // reuse byte ranges from an older video with the same URL.
+                // That is especially damaging for MP4 files: the cached
+                // timeline can disagree with the file OpenCV processed.
+                const mediaVersion = encodeURIComponent(metadata.last_edited || Date.now());
+                const separator = metadata.video_url.includes('?') ? '&' : '?';
+                setVideoURL(`${BASE_URL}${metadata.video_url}${separator}v=${mediaVersion}`);
                 setFileName(metadata.video_name);
                 setFPS(metadata.fps);
+                setFrameCount(metadata.frame_count ?? null);
 
                 // Setting potential data that was stored previously (bounding boxes, tasks, landmarks, signals)
                 if (data.persons) {
@@ -92,6 +101,7 @@ export const VideoProvider = ({ children }) => {
         setVideoURL("");
         setFileName("");
         setFPS(null);
+        setFrameCount(null);
         setPersons([]);
         setBoundingBoxes([]);
         setTasks([]);
@@ -126,6 +136,8 @@ export const VideoProvider = ({ children }) => {
                 setFileName,
                 fps,
                 setFPS,
+                frameCount,
+                setFrameCount,
                 boundingBoxes,
                 setBoundingBoxes,
                 tasks,

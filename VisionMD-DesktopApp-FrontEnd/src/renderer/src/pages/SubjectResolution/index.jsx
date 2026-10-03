@@ -1,4 +1,4 @@
-import React, { useContext, useEffect} from 'react';
+import React, { useContext, useEffect, useState} from 'react';
 import { useNavigate } from 'react-router-dom';
 import HeaderSection from './HeaderSection';
 import VideoPlayer from '../../components/VideoPlayer/VideoPlayer';
@@ -21,6 +21,7 @@ const SubjectResolution = () => {
     boundingBoxes,
     setBoundingBoxes,
     fps,
+    frameCount,
     setFPS,
     persons,
     setPersons,
@@ -31,6 +32,13 @@ const SubjectResolution = () => {
   } = useContext(VideoContext);
 
   const navigate = useNavigate();
+  const [autoAdvance, setAutoAdvance] = useState(false);
+  useEffect(() => {
+    if (autoAdvance && boxesReady && persons.length === 1 && persons[0].isSubject) {
+      setAutoAdvance(false);
+      navigate('/tasks');
+    }
+  }, [autoAdvance, boxesReady, persons, navigate]);
   useEffect(() => {
     if(!videoId) {
       navigate("/")
@@ -51,6 +59,7 @@ const SubjectResolution = () => {
             boundingBoxes={boundingBoxes}
             setBoundingBoxes={setBoundingBoxes}
             fps={fps}
+            frameCount={frameCount}
             persons={persons}
             setVideoReady={setVideoReady}
             videoURL={videoURL}
@@ -81,6 +90,7 @@ const SubjectResolution = () => {
             boxesReady={boxesReady}
           />
           <SubjectSelectionTab
+            onAutoAdvance={() => setAutoAdvance(true)}
             boundingBoxes={boundingBoxes}
             setBoundingBoxes={setBoundingBoxes}
             fps={fps}

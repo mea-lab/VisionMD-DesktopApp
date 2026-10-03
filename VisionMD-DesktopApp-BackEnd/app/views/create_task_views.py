@@ -1,9 +1,50 @@
 import os
 import importlib
+import time
 from rest_framework.decorators import api_view
 from django.http import JsonResponse, HttpResponse
 from django.urls import path
 from django.conf import settings
+from app.analysis.analysis_quality import assess_analysis_quality
+from app.analysis.analysis_cache import cache_key, load_cached, save_cached
+
+def execute_task(file_name: str, request):
+    """Execute one analysis request; shared by sync and background APIs."""
+    video_id = request.GET.get("id")
+    raw_parameters = request.POST.get("json_data", "{}")
+    key = cache_key(video_id, file_name, raw_parameters) if video_id else None
+    if key and request.GET.get("force") not in {"1", "true", "yes"}:
+        cached = load_cached(video_id, key)
+        if cached is not None:
+            # Quality checks are lightweight and may evolve independently of
+            # cached model inference. Never return a stale quality decision.
+            cached["analysisQuality"] = assess_analysis_quality(cached)
+            cached["analysisRuntime"] = {
+                **cached.get("analysisRuntime", {}),
+                "cache_hit": True,
+                "total_seconds": 0.0,
+                "task": file_name,
+            }
+            return cached
+
+    module_name = f"app.analysis.tasks.{file_name}"
+    task_module = importlib.import_module(module_name)
+    class_name = f"{''.join(word.capitalize() for word in file_name.split('_'))}Task"
+    task_instance = getattr(task_module, class_name)()
+    started = time.perf_counter()
+    response_data = task_instance.api_response(request)
+    if isinstance(response_data, HttpResponse):
+        return response_data
+    response_data["analysisQuality"] = assess_analysis_quality(response_data)
+    response_data["analysisRuntime"] = {
+        "total_seconds": round(time.perf_counter() - started, 3),
+        "task": file_name,
+        "cache_hit": False,
+    }
+    if key:
+        save_cached(video_id, key, response_data)
+    return response_data
+
 
 def _create_view_for_task(file_name: str):
     """
@@ -17,18 +58,7 @@ def _create_view_for_task(file_name: str):
     
     @api_view(['POST'])
     def task_view(request):
-        module_name = f"app.analysis.tasks.{file_name}"
-        task_module = importlib.import_module(module_name)
-
-        parts = file_name.split('_')
-        camel_cased = ''.join(word.capitalize() for word in parts)
-        class_name = f"{camel_cased}Task"
-
-        task_class = getattr(task_module, class_name)
-        task_instance = task_class()
-
-        # We assume each class has a method called api_response(request)
-        response_data = task_instance.api_response(request)
+        response_data = execute_task(file_name, request)
         if isinstance(response_data, HttpResponse):  # covers JsonResponse, etc.
             return response_data
         return JsonResponse(response_data)
@@ -48,8 +78,14 @@ def generate_task_urlpatterns():
     urlpatterns = []
 
     for file in os.listdir(tasks_dir):
-        # Only consider .py files, ignore base_task.py and __init__.py
-        if file.endswith(".py") and file not in ["base_task.py", "__init__.py"]:
+        # Only consider concrete task modules.  Private modules (whose file
+        # name begins with an underscore) hold shared implementation details
+        # and deliberately do not get a public API route.
+        if (
+            file.endswith(".py")
+            and file not in ["base_task.py", "__init__.py"]
+            and not file.startswith("_")
+        ):
             file_name = file[:-3]
 
             # Build a Django view function on the fly
