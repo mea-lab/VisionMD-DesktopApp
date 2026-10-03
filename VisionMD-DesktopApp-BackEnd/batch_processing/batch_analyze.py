@@ -34,7 +34,7 @@ from app.analysis.model_registry import reset_yolo_runtime
 from app.analysis.torch_device import preferred_device, run_with_device_fallback
 from batch_processing.export_results import export_companions
 from app.views.upload_video import (
-    convert_to_cfr, convert_to_square_pixels, get_rotation,
+    normalize_video, get_rotation,
     probe_decoded_video_timing,
 )
 
@@ -86,18 +86,8 @@ def prepare_analysis_video(video, root):
     destination=root/"normalized_inputs"/video.name
     destination.parent.mkdir(parents=True,exist_ok=True)
     shutil.copy2(video,destination)
-    cap=cv2.VideoCapture(str(destination))
-    nominal_fps=cap.get(cv2.CAP_PROP_FPS) or 30.
-    cap.release()
-    source_count,_=probe_decoded_video_timing(str(destination))
-    convert_to_cfr(str(destination),nominal_fps)
-    convert_to_square_pixels(str(destination))
-    normalized_count,_=probe_decoded_video_timing(str(destination))
-    if normalized_count!=source_count:
-        raise RuntimeError(
-            f"Batch normalization changed decoded frames from {source_count} "
-            f"to {normalized_count}; refusing to produce a misaligned project.")
-    return destination
+    normalized=normalize_video(str(destination),add_audio=False)
+    return Path(normalized["path"])
 
 def discover(video, model, sample_fps, device, imgsz, conf, min_coverage, padding):
     """Static-ROI association method from discover_person_candidates.py."""

@@ -11,6 +11,7 @@ import subprocess
 import shutil
 import os, sys
 import traceback
+from functools import lru_cache
 
 def get_ffmpeg_path():
     if getattr(sys, 'frozen', False):
@@ -512,6 +513,159 @@ def get_rotation(path):
     return 0
 
 
+@lru_cache(maxsize=4)
+def _supports_strip_fps(ffmpeg_path):
+    result = subprocess.run([ffmpeg_path, '-hide_banner', '-h', 'filter=setpts'],
+                            capture_output=True, text=True,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    return result.returncode == 0 and 'strip_fps' in result.stdout
+
+
+def _normalization_probe(input_path):
+    """Read normalization metadata and count frames in one decode pass."""
+    cmd = [get_ffprobe_path(), '-v', 'error', '-count_frames',
+           '-show_streams', '-show_format', '-of', 'json', input_path]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(f"FFprobe normalization check failed:\n{result.stderr}")
+    data = json.loads(result.stdout)
+    video = next((s for s in data.get('streams', []) if s.get('codec_type') == 'video'), None)
+    if video is None:
+        raise RuntimeError('Input has no video stream.')
+    count = int(video.get('nb_read_frames') or 0)
+    duration = float(video.get('duration') or data.get('format', {}).get('duration') or 0)
+    if count < 1 or not duration > 0:
+        raise RuntimeError('Could not determine decoded video frame timing.')
+    audio = next((s for s in data.get('streams', []) if s.get('codec_type') == 'audio'), None)
+    return {'video': video, 'audio': audio, 'frame_count': count, 'duration': duration}
+
+
+def _square_pixel_size(video):
+    width, height = int(video['width']), int(video['height'])
+    def ratio(value):
+        try:
+            a, b = value.split(':')
+            return float(a) / float(b)
+        except (AttributeError, ValueError, ZeroDivisionError):
+            return None
+    sar = ratio(video.get('sample_aspect_ratio'))
+    dar = ratio(video.get('display_aspect_ratio'))
+    if sar is None:
+        sar = dar * height / width if dar else 1.0
+    if abs(sar - 1.0) < .001:
+        return None
+    target_width = max(2, int(round(width * sar)))
+    return target_width + target_width % 2, height
+
+
+def normalize_video(input_path, add_audio=True):
+    """Normalize in at most one FFmpeg pass, preserving decoded video frames.
+
+    Keep the current libx264 quality settings. Compatible zero-based CFR MP4
+    streams are left untouched; container/audio-only changes copy video packets.
+    Two full frame scans suffice when conversion is needed (source and output).
+    Rotation stays in metadata so the existing player/analysis rotation handling
+    remains responsible for orienting the original sensor pixels.
+    """
+    source = _normalization_probe(input_path)
+    video, audio = source['video'], source['audio']
+    count, duration = source['frame_count'], source['duration']
+    first_timestamp = probe_first_video_timestamp(input_path)
+    retime = (video.get('r_frame_rate') != video.get('avg_frame_rate')
+              or abs(first_timestamp) > .001)
+    square_size = _square_pixel_size(video)
+    encode_video = (retime or square_size is not None
+                    or video.get('codec_name') != 'h264'
+                    or video.get('pix_fmt') not in {'yuv420p', 'yuvj420p'}
+                    or int(video['width']) % 2 or int(video['height']) % 2)
+    encode_audio = audio is not None and (audio.get('codec_name') != 'aac'
+                                        or abs(first_timestamp) > .001)
+    dummy_audio = audio is None and add_audio
+    base, ext = os.path.splitext(input_path)
+    summary = {'path': input_path, 'source_frame_count': count,
+               'source_duration': duration, 'frame_count': count, 'duration': duration}
+    if not (encode_video or encode_audio or dummy_audio) and ext.lower() == '.mp4':
+        return summary
+
+    # Write a separate file and verify before touching the source.
+    target = f'{base}.mp4'
+    import tempfile
+    fd, output = tempfile.mkstemp(prefix='visionmd-normalize-', suffix='.mp4',
+                                  dir=os.path.dirname(os.path.abspath(input_path)))
+    os.close(fd)
+    cmd = [get_ffmpeg_path(), '-v', 'error', '-y', '-noautorotate', '-i', input_path]
+    if dummy_audio:
+        # A finite audio source avoids -shortest truncating the final video frame.
+        cmd += ['-f', 'lavfi', '-i',
+                f'anullsrc=channel_layout=stereo:sample_rate=48000:d={duration:.12f}']
+    cmd += ['-map', '0:v:0']
+    if dummy_audio:
+        cmd += ['-map', '1:a:0']
+    elif audio is not None:
+        cmd += ['-map', '0:a:0']
+    filters = []
+    strip_fps = False
+    if retime:
+        rate = f'{count / duration:.12f}'
+        # Assign one exact tick per source frame and remove obsolete source
+        # frame-duration metadata before CFR synchronization.
+        strip_fps = _supports_strip_fps(cmd[0])
+        pts_filter = 'setpts=N:strip_fps=1' if strip_fps else 'setpts=N'
+        filters += [f'settb=expr=1/({rate})', pts_filter]
+    if square_size is not None:
+        filters += [f'scale={square_size[0]}:{square_size[1]}', 'setsar=1']
+    if int(video['width']) % 2 or int(video['height']) % 2:
+        filters += ['pad=ceil(iw/2)*2:ceil(ih/2)*2']
+    if encode_video:
+        if filters:
+            cmd += ['-vf', ','.join(filters)]
+        if retime:
+            cmd += ['-enc_time_base', 'filter']
+            if strip_fps:
+                cmd += ['-r', rate]
+            # Older builds cannot clear inherited frame durations: passthrough
+            # preserves each observation, rather than resampling those durations.
+        cmd += ['-fps_mode', 'cfr' if retime and strip_fps else 'passthrough', '-c:v', 'libx264',
+                '-preset', 'medium', '-tune', 'grain', '-crf', '15',
+                '-pix_fmt', 'yuv420p']
+    else:
+        cmd += ['-c:v', 'copy']
+    if audio is not None or dummy_audio:
+        cmd += ['-c:a', 'aac' if encode_audio or dummy_audio else 'copy']
+        if encode_audio or dummy_audio:
+            cmd += ['-b:a', '128k']
+        if encode_audio and abs(first_timestamp) > .001:
+            cmd += ['-af', 'asetpts=PTS-STARTPTS']
+    cmd += ['-movflags', '+faststart', output]
+    try:
+        result = subprocess.run(cmd, capture_output=True,
+                                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        if result.returncode:
+            raise RuntimeError(f"FFmpeg normalization failed:\n{result.stderr.decode('utf-8', errors='replace')}")
+        normalized = _normalization_probe(output)
+        if normalized['frame_count'] != count:
+            raise RuntimeError(f"Normalization changed decoded frames from {count} "
+                               f"to {normalized['frame_count']}; source file was preserved.")
+        if abs(probe_first_video_timestamp(output)) > .001:
+            raise RuntimeError('Normalization did not produce zero-based video timestamps; source file was preserved.')
+        if abs(normalized['duration'] - duration) >= duration / count:
+            raise RuntimeError('Normalization changed video duration by at least one frame; source file was preserved.')
+        if _square_pixel_size(normalized['video']) is not None:
+            raise RuntimeError('Normalization did not produce square pixels; source file was preserved.')
+        if normalized['video'].get('codec_name') != 'h264':
+            raise RuntimeError('Normalization did not produce H.264 video; source file was preserved.')
+        if add_audio and (normalized['audio'] is None or normalized['audio'].get('codec_name') != 'aac'):
+            raise RuntimeError('Normalization did not produce AAC audio; source file was preserved.')
+        os.replace(output, target)
+        if os.path.abspath(input_path) != os.path.abspath(target):
+            os.remove(input_path)
+        summary.update(path=target, duration=normalized['duration'])
+        return summary
+    finally:
+        if os.path.exists(output):
+            os.remove(output)
+
+
 @api_view(['POST'])
 def upload_video(request):
     try:
@@ -577,18 +731,16 @@ def upload_video(request):
         # Capture the source's decoded video frames before any normalization.
         # This is the invariant that matters; nominal FPS and container
         # ``nb_frames`` fields are not reliable for VFR phone recordings.
-        source_frame_count, source_duration = probe_decoded_video_timing(saved_video_path)
-        convert_to_cfr(saved_video_path, fps)
-        convert_to_square_pixels(saved_video_path)
-        saved_video_path = add_dummy_audio_if_missing(saved_video_path)
-        saved_video_path = convert_to_h264_aac(saved_video_path)
-        saved_video_path = convert_to_mp4(saved_video_path)
+        normalized = normalize_video(saved_video_path)
+        saved_video_path = normalized['path']
+        source_frame_count = normalized['source_frame_count']
+        source_duration = normalized['source_duration']
         original_filename = os.path.basename(saved_video_path)
         file_type = os.path.splitext(original_filename)[1].lstrip('.')
         cap2 = cv2.VideoCapture(saved_video_path)
         ret, frame = cap2.read()
         cap2.release()
-        frame_count, decoded_duration = probe_decoded_video_timing(saved_video_path)
+        frame_count, decoded_duration = normalized["frame_count"], normalized["duration"]
         fps = frame_count / decoded_duration
         if frame_count != source_frame_count:
             raise RuntimeError(

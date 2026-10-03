@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState } from 'react';
+import { editTaskBox } from '../../pages/TaskSelection/taskBoundingBox';
 import { landmarkDisplayColor } from './landmarkColor';
 
 const ResizeHandles = ({ x, y, width, height, onResize, item, index, handleSize = 12.5, strokeThickness }) => {
@@ -163,7 +164,7 @@ const InteractiveOverlays = ({
     }
     setTasks((prevBoxes) =>
       prevBoxes.map((task, idx) =>
-        idx === taskIndex ? { ...task, x: newX, y: newY, box_width: newWidth, box_height: newHeight } : task
+        idx === taskIndex ? editTaskBox(task, { x: newX, y: newY, box_width: newWidth, box_height: newHeight }) : task
       )
     );
   };
@@ -199,7 +200,7 @@ const InteractiveOverlays = ({
     const newY = initialY + dy;
     setTasks((prevBoxes) =>
       prevBoxes.map((task, idx) =>
-        idx === draggingTaskRef.current?.taskIndex?  { ...task, x: newX, y: newY } : task
+        idx === draggingTaskRef.current?.taskIndex?  editTaskBox(task, { x: newX, y: newY }) : task
       )
     );
   };
