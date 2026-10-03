@@ -30,6 +30,13 @@ from django.test import RequestFactory
 from rest_framework.response import Response
 from ultralytics import YOLO
 from app.analysis.analysis_quality import assess_analysis_quality
+from app.analysis.model_registry import reset_yolo_runtime
+from app.analysis.torch_device import preferred_device, run_with_device_fallback
+from batch_processing.export_results import export_companions
+from app.views.upload_video import (
+    convert_to_cfr, convert_to_square_pixels, get_rotation,
+    probe_decoded_video_timing,
+)
 
 TASKS = {
     "finger_tap_left": "Finger Tap Left",
@@ -74,17 +81,42 @@ def static_box(observations, width, height, padding):
     x1,y1=np.quantile(boxes[:,:2],.05,axis=0); x2,y2=np.quantile(boxes[:,2:],.95,axis=0); bw,bh=x2-x1,y2-y1
     return [int(round(x)) for x in (max(0,x1-padding*bw),max(0,y1-padding*bh),min(width,x2+padding*bw),min(height,y2+padding*bh))]
 
+def prepare_analysis_video(video, root):
+    """Create the same frame-preserving CFR representation used by upload."""
+    destination=root/"normalized_inputs"/video.name
+    destination.parent.mkdir(parents=True,exist_ok=True)
+    shutil.copy2(video,destination)
+    cap=cv2.VideoCapture(str(destination))
+    nominal_fps=cap.get(cv2.CAP_PROP_FPS) or 30.
+    cap.release()
+    source_count,_=probe_decoded_video_timing(str(destination))
+    convert_to_cfr(str(destination),nominal_fps)
+    convert_to_square_pixels(str(destination))
+    normalized_count,_=probe_decoded_video_timing(str(destination))
+    if normalized_count!=source_count:
+        raise RuntimeError(
+            f"Batch normalization changed decoded frames from {source_count} "
+            f"to {normalized_count}; refusing to produce a misaligned project.")
+    return destination
+
 def discover(video, model, sample_fps, device, imgsz, conf, min_coverage, padding):
     """Static-ROI association method from discover_person_candidates.py."""
     cap=cv2.VideoCapture(str(video))
     if not cap.isOpened(): raise FileNotFoundError(video)
-    fps=cap.get(cv2.CAP_PROP_FPS) or 30.; width,height=int(cap.get(3)),int(cap.get(4)); count=int(cap.get(7))
+    count,duration=probe_decoded_video_timing(str(video)); fps=count/duration
+    width,height=int(cap.get(3)),int(cap.get(4))
+    device=preferred_device(device)
     step=max(1,round(fps/sample_fps)); diagonal=float(np.hypot(width,height)); tracks=[]; frame=sample=0
     while True:
         ok,image=cap.read()
         if not ok: break
         if frame % step: frame+=1; continue
-        result=model.predict(image,classes=[0],conf=conf,imgsz=imgsz,device=device,verbose=False)[0]
+        def predict(active_device):
+            return model.predict(image,classes=[0],conf=conf,imgsz=imgsz,
+                                 device=active_device,verbose=False)[0]
+        result,device=run_with_device_fallback(
+            predict,device,label="batch YOLO person detection",
+            on_cpu_fallback=lambda: reset_yolo_runtime(model))
         boxes=result.boxes.xyxy.cpu().numpy() if result.boxes else np.empty((0,4)); scores=result.boxes.conf.cpu().numpy() if result.boxes else []
         keypoints=result.keypoints.data.cpu().numpy() if result.keypoints is not None else []
         detections=[{"box":box.tolist(),"confidence":float(scores[i]),"keypoints":keypoints[i] if len(keypoints) else None,"sample":sample} for i,box in enumerate(boxes)]
@@ -102,11 +134,18 @@ def discover(video, model, sample_fps, device, imgsz, conf, min_coverage, paddin
         for di,det in enumerate(detections):
             if di not in used_d: tracks.append({"observations":[det]})
         sample+=1; frame+=1
-    cap.release(); candidates=[]
+    cap.release()
+    if frame!=count:
+        raise RuntimeError(
+            f"OpenCV decoded {frame} frames from the normalized video, but "
+            f"FFprobe counted {count}. Refusing to export a misaligned project.")
+    candidates=[]
     for n,track in enumerate(tracks,1):
         coverage=len(track["observations"])/max(1,sample)
         if coverage>=min_coverage: candidates.append({"candidate_id":f"candidate_{n:03d}","bbox_xyxy":static_box(track["observations"],width,height,padding),"coverage":round(coverage,4),"mean_confidence":round(float(np.mean([x["confidence"] for x in track["observations"]])),4)})
-    return {"fps":fps,"width":width,"height":height,"frame_count":count,"candidates":candidates}
+    return {"fps":fps,"width":width,"height":height,"frame_count":count,
+            "duration":duration,"rotation":get_rotation(str(video)),
+            "candidates":candidates}
 
 def task_class(key):
     module=importlib.import_module(f"app.analysis.tasks.{key}")
@@ -116,11 +155,15 @@ def stage(video, info, root):
     folder=root/"video_uploads"/uuid.uuid4().hex; folder.mkdir(parents=True); target=folder/video.name
     try: os.symlink(video.resolve(),target)
     except OSError: shutil.copy2(video,target)
-    (folder/"metadata.json").write_text(json.dumps({"metadata":{"fps":info["fps"],"rotation":0,"video_name":video.name}}))
+    metadata={"fps":info["fps"],"rotation":info["rotation"],
+              "video_name":video.name,"frame_count":info["frame_count"],
+              "source_frame_count":info["frame_count"],
+              "source_duration":info["duration"]}
+    (folder/"metadata.json").write_text(json.dumps({"metadata":metadata}))
     return folder.name
 
 def analyze(video, info, candidate, key, height_cm, norm_strategy, root):
-    video_id=stage(video,info,root); x1,y1,x2,y2=candidate["bbox_xyxy"]; duration=info["frame_count"]/info["fps"]
+    video_id=stage(video,info,root); x1,y1,x2,y2=candidate["bbox_xyxy"]; duration=info["duration"]
     data={"boundingBox":{"x":x1,"y":y1,"width":x2-x1,"height":y2-y1},"task_name":TASKS[key],"start_time":0.,"end_time":duration,"norm_strategy":norm_strategy}
     if key=="gait":
         if height_cm is None: raise ValueError("--height-cm is required for gait")
@@ -153,7 +196,7 @@ def quality(result):
 
 def project_snapshot(video, info, candidate, key, norm_strategy, result):
     """Build a complete document accepted by Home -> Load Project JSON."""
-    x1,y1,x2,y2=candidate["bbox_xyxy"]; duration=info["frame_count"]/info["fps"]
+    x1,y1,x2,y2=candidate["bbox_xyxy"]; duration=info["duration"]
     person_id=1
     box={"id":person_id,"x":x1,"y":y1,"width":x2-x1,"height":y2-y1,"Subject":True}
     bounding_boxes=[{"frameNumber":frame,"data":[dict(box)]} for frame in range(info["frame_count"])]
@@ -162,12 +205,15 @@ def project_snapshot(video, info, candidate, key, norm_strategy, result):
           "x":x1,"y":y1,"box_width":x2-x1,"box_height":y2-y1,
           "norm_strategy":norm_strategy,"full_video":True,"data":result}
     return {"format":"visionmd-project","version":1,
-            "video":{"name":video.name,"fps":info["fps"]},
+            "video":{"name":video.name,"fps":info["fps"],
+                     "frame_count":info["frame_count"],"duration":duration,
+                     "width":info["width"],"height":info["height"],
+                     "rotation":info["rotation"]},
             "data":{"fps":info["fps"],"persons":persons,
                     "boundingBoxes":bounding_boxes,"tasks":[task]}}
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__); parser.add_argument("source",type=Path); parser.add_argument("--task",choices=TASKS,required=True); parser.add_argument("--weights",type=Path,required=True); parser.add_argument("--output-dir",type=Path,required=True); parser.add_argument("--height-cm",type=float); parser.add_argument("--norm-strategy",help="Override the task default normalization"); parser.add_argument("--sample-fps",type=float,default=2.); parser.add_argument("--device",default="cuda"); parser.add_argument("--imgsz",type=int,default=960); parser.add_argument("--conf",type=float,default=.25); parser.add_argument("--min-coverage",type=float,default=.20); parser.add_argument("--padding",type=float,default=.12)
+    parser=argparse.ArgumentParser(description=__doc__); parser.add_argument("source",type=Path); parser.add_argument("--task",choices=TASKS,required=True); parser.add_argument("--weights",type=Path,required=True); parser.add_argument("--output-dir",type=Path,required=True); parser.add_argument("--height-cm",type=float); parser.add_argument("--norm-strategy",help="Override the task default normalization"); parser.add_argument("--sample-fps",type=float,default=2.); parser.add_argument("--device",default="auto",help="Torch device: auto, cpu, cuda, cuda:N, or mps"); parser.add_argument("--imgsz",type=int,default=960); parser.add_argument("--conf",type=float,default=.25); parser.add_argument("--min-coverage",type=float,default=.20); parser.add_argument("--padding",type=float,default=.12)
     args=parser.parse_args(); videos=[args.source] if args.source.is_file() else sorted(p for p in args.source.iterdir() if p.suffix.lower() in VIDEO_SUFFIXES)
     if not videos: parser.error("No supported videos found");
     if args.sample_fps<=0: parser.error("--sample-fps must be positive")
@@ -177,29 +223,45 @@ def main():
         settings.MEDIA_ROOT=temporary
         try:
             for video in videos:
-                info=discover(video,model,args.sample_fps,args.device,args.imgsz,args.conf,args.min_coverage,args.padding); entries=[]
+                analysis_video=prepare_analysis_video(video,Path(temporary))
+                info=discover(analysis_video,model,args.sample_fps,args.device,args.imgsz,args.conf,args.min_coverage,args.padding); entries=[]
                 for candidate in info["candidates"]:
-                    entry=dict(candidate)
+                    entry={}
                     try:
-                        result=analyze(video,info,candidate,args.task,args.height_cm,norm_strategy,Path(temporary))
+                        result=analyze(analysis_video,info,candidate,args.task,args.height_cm,norm_strategy,Path(temporary))
                         result["analysisQuality"]=assess_analysis_quality(result)
                         score,metrics=quality(result)
-                        output=args.output_dir/f"{video.stem}_{candidate['candidate_id']}_{args.task}.json"
-                        output.write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
-                        project_output=args.output_dir/f"{video.stem}_{candidate['candidate_id']}_{args.task}_visionmd_project.json"
-                        snapshot=project_snapshot(video,info,candidate,args.task,norm_strategy,result)
-                        project_output.write_text(json.dumps(snapshot,indent=2,allow_nan=False)+"\n")
-                        entry.update(status="accepted",quality_score=score,quality=metrics,
-                                     result_json=str(output),project_json=str(project_output))
+                        entry.update(candidate=candidate,result=result,status="accepted",
+                                     quality_score=score,quality=metrics)
                     except Exception as exc: entry.update(status="discarded",reason=str(exc))
                     entries.append(entry)
                 entries.sort(key=lambda x:x.get("quality_score",-1),reverse=True)
                 accepted=[entry for entry in entries if entry.get("status")=="accepted"]
+                stem=f"{video.stem}_{args.task}"
+                # Remove candidate-specific artifacts made by older versions
+                # for this exact video/task before writing the selected result.
+                for legacy in args.output_dir.glob(f"{video.stem}_candidate_*_{args.task}*"):
+                    if legacy.is_file(): legacy.unlink()
+                manifest_path=args.output_dir/f"{stem}_manifest.json"
                 if accepted:
-                    best_source=Path(accepted[0]["project_json"])
-                    best_output=args.output_dir/f"{video.stem}_{args.task}_visionmd_project.json"
-                    shutil.copy2(best_source,best_output)
-                (args.output_dir/f"{video.stem}_{args.task}_manifest.json").write_text(json.dumps({"video":str(video),"task":args.task,"best_project_json":str(best_output) if accepted else None,"candidates":entries},indent=2)+"\n"); print(f"{video.name}: {sum(x['status']=='accepted' for x in entries)}/{len(entries)} candidates accepted")
+                    selected=accepted[0]; result=selected["result"]; candidate=selected["candidate"]
+                    output=args.output_dir/f"{stem}.json"
+                    output.write_text(json.dumps(result,indent=2,allow_nan=False)+"\n")
+                    project_output=args.output_dir/f"{stem}_visionmd_project.json"
+                    snapshot=project_snapshot(video,info,candidate,args.task,norm_strategy,result)
+                    project_output.write_text(json.dumps(snapshot,indent=2,allow_nan=False)+"\n")
+                    companions=export_companions(result,output,fps=info["fps"],
+                        task=TASKS[args.task],video=video.name,candidate=None)
+                    manifest={"video":str(video),"task":args.task,"status":"completed",
+                        "result_json":str(output),"project_json":str(project_output),
+                        **companions,"analysis_quality":result["analysisQuality"]["status"]}
+                    print(f"{video.name}: selected result exported")
+                else:
+                    reasons=[entry.get("reason","Candidate was not accepted") for entry in entries]
+                    manifest={"video":str(video),"task":args.task,"status":"failed",
+                              "reason":"; ".join(reasons) or "No subject candidate was found"}
+                    print(f"{video.name}: no valid result")
+                manifest_path.write_text(json.dumps(manifest,indent=2)+"\n")
         finally: settings.MEDIA_ROOT=original_root
 
 if __name__=="__main__":

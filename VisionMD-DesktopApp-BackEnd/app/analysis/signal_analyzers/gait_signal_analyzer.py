@@ -1,5 +1,8 @@
 import numpy as np
 import scipy.signal as signal
+from app.analysis.signal_analyzers.gait_step_width import foot_line_widths
+from app.analysis.signal_analyzers.gait_segment_variability import combine_segment_variability
+from app.analysis.signal_analyzers.gait_extended_features import ankle_lift_samples, extended_results, phase_time_samples, velocity
 from app.analysis.models.gait_transformer.gait_phase_kalman import gait_kalman_smoother, compute_phases, get_event_times
 from app.analysis.signal_analyzers.base_signal_analyzer import BaseSignalAnalyzer
 
@@ -76,6 +79,12 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
                 return_samples=True,
             )
 
+        quality.update({
+            "frame_interval_ms": 1000.0 / float(fps),
+            "temporal_variability_precision": "limited by video event timing; interpolation does not establish subframe accuracy",
+            "ankle_lift_reference": "camera vertical above interpolated same-side stance medians; not toe/sole clearance",
+            "velocity_method": "segment-local quadratic derivative, approximately 0.2 second window",
+        })
         if return_details:
             return results, gait_event_dic, samples, quality
         return results, gait_event_dic
@@ -122,7 +131,7 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
         ltf = np.asarray(gait_event_dic['left_up'],     dtype=float)
         rhs = np.asarray(gait_event_dic['right_down'],  dtype=float)
         rtf = np.asarray(gait_event_dic['right_up'],    dtype=float)
-        if len(lhs) == 0 or len(ltf) == 0 or len(rhs) == 0 or len(rtf) == 0:
+        if len(lhs) == 0 or len(rhs) == 0:
             raise Exception(f'No gait events were detected by gait transformer to compute features. ' + 
                             f'Number of LHS events: {len(lhs)}. ' +
                             f'Number of LTF events: {len(ltf)}. ' + 
@@ -132,40 +141,6 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
 
         # --- 2) Temporal phases (in frames) ---
         
-        # Calculate swing times
-        if ltf[0] < lhs[0]:
-            num_left_swings = min(len(ltf), len(lhs))
-            L_swing  = lhs[0:num_left_swings] - ltf[0:num_left_swings]
-        else:
-            num_left_swings = min(len(ltf), len(lhs) - 1)
-            L_swing  = lhs[1:num_left_swings + 1] - ltf[0:num_left_swings]
-            
-        if rtf[0] < rhs[0]:
-            num_right_swings = min(len(rtf), len(rhs))
-            R_swing  = rhs[0:num_right_swings] - rtf[0:num_right_swings]
-        else:
-            num_right_swings = min(len(rtf), len(rhs) - 1)
-            R_swing  = rhs[1:num_right_swings + 1] - rtf[0:num_right_swings]
-        if len(R_swing) == 0 or len(L_swing) == 0:
-            raise ValueError("No right swing or left swing events were detected by gait transformer to compute features.")
-
-        # Calculate stance times
-        if lhs[0] < ltf[0]:
-            num_left_stances = min(len(lhs), len(ltf))
-            L_stance  = ltf[0:num_left_stances] - lhs[0:num_left_stances]
-        else:
-            num_left_stances = min(len(lhs), len(ltf) - 1)
-            L_stance  = ltf[1:num_left_stances + 1] - lhs[0:num_left_stances]
-
-        if rhs[0] < rtf[0]:
-            num_right_stances = min(len(rhs), len(rtf))
-            R_stance  = rtf[0:num_right_stances] - rhs[0:num_right_stances]
-        else:
-            num_right_stances = min(len(rhs), len(rtf) - 1)
-            R_stance  = rtf[1:num_right_stances + 1] - rhs[0:num_right_stances]
-        if len(R_stance) == 0 or len(L_stance) == 0:
-            raise ValueError("No right stance or left stance events were detected by gait transformer to compute features.")
-
         # Calculate step times
         if rhs[0] < lhs[0]:
             num_left_steps = min(len(rhs), len(lhs))
@@ -183,89 +158,38 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
         if len(R_steptime) == 0 or len(L_steptime) == 0:
             raise ValueError("Not enough gait events were detected by gait transformer to compute right steptime or left steptime features.")
 
-        # Calculate double support times
-        if lhs[0] < rtf[0]:
-            num_d1 = min(len(lhs), len(rtf))
-            d1 = rtf[:num_d1] - lhs[:num_d1]
-        else:
-            num_d1 = min(len(lhs), len(rtf) - 1)
-            d1 = rtf[1:1 + num_d1] - lhs[:num_d1]
-
-        if rhs[0] < ltf[0]:
-            num_d2 = min(len(rhs), len(ltf))
-            d2 = ltf[:num_d2] - rhs[:num_d2]
-        else:
-            num_d2 = min(len(rhs), len(ltf) - 1)
-            d2 = ltf[1:1 + num_d2] - rhs[:num_d2]
-        d1_trimmed = d1[:min(len(d1), len(d2))]
-        d2_trimmed = d2[:min(len(d1), len(d2))]
-        if len(d1_trimmed) == 0 or len(d2_trimmed) == 0:
-            raise ValueError("Not enough gait events were detected by gait transformer to compute the double support time feature.")
-
-        duration_groups = (L_swing, R_swing, L_stance, R_stance, L_steptime, R_steptime)
+        duration_groups = (L_steptime, R_steptime)
         if any(np.any(values <= 0) or np.any(values > 3.0 * fps) for values in duration_groups):
             raise ValueError("Gait events produced a non-positive or implausibly long phase duration.")
 
         # Combine for overall
-        all_swings    = np.concatenate([L_swing, R_swing])
-        all_stances   = np.concatenate([L_stance, R_stance])
         all_steptimes = np.concatenate([L_steptime, R_steptime])
-        all_double_support = (d1_trimmed + d2_trimmed)[~np.isnan(d1_trimmed + d2_trimmed)]
 
         # --- 3) Convert to seconds & compute temporal averages ---
-        avg_swing_left   = L_swing.mean()    / fps
-        avg_swing_right  = R_swing.mean()    / fps
-        avg_stance_left  = L_stance.mean()   / fps
-        avg_stance_right = R_stance.mean()   / fps
         avg_steptime_left  = L_steptime.mean() / fps
         avg_steptime_right = R_steptime.mean() / fps
 
-        avg_swing    = all_swings.mean()    / fps
-        avg_stance   = all_stances.mean()   / fps
         avg_steptime = all_steptimes.mean() / fps
-        avg_double   = all_double_support.mean() / fps
         cadence      = 60.0 / avg_steptime
 
-        # --- 4) Spatial metrics from hip Z (reorder, scale to meters, flip Y) ---
-        kp = keypoints_3D[:, gait_phase_order_idx] / 1000.0 
+        # --- 4) Ankle-contact spatial estimates (metres) ---
+        kp = keypoints_3D[:, gait_phase_order_idx] / 1000.0
         kp[:, :, 1] *= -1.0
-        z_hip = kp[:, 0, 2]
-
         lhs_idx = np.round(lhs).astype(int)
         rhs_idx = np.round(rhs).astype(int)
-
-        # step lengths per side
-        if lhs[0] < rhs[0]:
-            m = min(len(lhs_idx) - 1, len(rhs_idx))
-            sl_left  = np.abs(z_hip[lhs_idx[1:m+1]] - z_hip[rhs_idx[:m]])
-            sl_right = np.abs(z_hip[rhs_idx[:m]]    - z_hip[lhs_idx[:m]])
-        else:
-            m = min(len(lhs_idx), len(rhs_idx) - 1)
-            sl_left  = np.abs(z_hip[lhs_idx[:m]]      - z_hip[rhs_idx[:m]])
-            sl_right = np.abs(z_hip[rhs_idx[1:m+1]]   - z_hip[lhs_idx[:m]])
-
-        if len(sl_left) == 0 or len(sl_right) == 0:
-            raise ValueError("Not enough alternating heel strikes to calculate step length.")
-        all_step_lengths = np.concatenate([sl_left, sl_right])
-        strikes   = np.unique(np.sort(np.concatenate([lhs_idx, rhs_idx])))
-        if len(strikes) < 2 or strikes[-1] == strikes[0]:
-            raise ValueError("At least two distinct heel strikes are required to calculate velocity.")
-        avg_velocity = np.abs((z_hip[strikes[-1]] - z_hip[strikes[0]]) / (strikes[-1] - strikes[0]) * fps)
-
         synthgait = self._synthgait_spatial_features(kp, lhs_idx, rhs_idx, fps=fps)
+        sl_left = synthgait["step_lengths"][synthgait["step_sides"] == 6]
+        sl_right = synthgait["step_lengths"][synthgait["step_sides"] == 3]
+        speed_left = synthgait["step_speeds"][synthgait["step_sides"] == 6]
+        speed_right = synthgait["step_speeds"][synthgait["step_sides"] == 3]
+        avg_length = float((sl_left.mean() + sl_right.mean()) / 2)
+        avg_velocity = float((speed_left.mean() + speed_right.mean()) / 2)
 
         results = {
-            "Average stance time":           float(avg_stance),
-            "Average swing time":            float(avg_swing),
-            "Average double support time":   float(avg_double),
             "Average step time":             float(avg_steptime),
-            "Average step length":           float(all_step_lengths.mean()),
+            "Average step length":           avg_length,
             "Average velocity":              float(avg_velocity),
             "Average cadence":               float(cadence),
-            "Average stance time left":      float(avg_stance_left),
-            "Average stance time right":     float(avg_stance_right),
-            "Average swing time left":       float(avg_swing_left),
-            "Average swing time right":      float(avg_swing_right),
             "Average step time left":        float(avg_steptime_left),
             "Average step time right":       float(avg_steptime_right),
             "Average step length left":      float(sl_left.mean()),
@@ -274,11 +198,9 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
             # pelvis-centred wrist-forward signals used for arm-swing amplitude.
             # This replaces the legacy elbow/camera-depth correlation.
             "Arm swing correlation":         float(synthgait["arm_swing_correlation"]),
-            # The four measures below follow the definitions in SynthGait-19K
-            # (Mehraban et al., 2026).  The pre-existing VisionMD step-length
-            # measure is intentionally retained for backward compatibility.
-            "SynthGait step length":          float(synthgait["step_lengths"].mean()),
-            "Step width":                     float(synthgait["step_widths"].mean()),
+            # Ankle-derived spatial estimates and normalized posture/arm range.
+            # Width uses opposite-foot progression-line geometry.
+            "Step width":                     float(synthgait["step_widths"].mean()) if synthgait["step_widths"].size else float("nan"),
             "Stooped posture":                float(synthgait["stooped_posture"]),
             "Arm swing left":                 float(synthgait["left_arm_swing"]),
             "Arm swing right":                float(synthgait["right_arm_swing"]),
@@ -288,26 +210,13 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
             "Step speed variability":         float(self._sample_standard_deviation(synthgait["step_speeds"])),
             # This is a VisionMD addition rather than a SynthGait-19K label.
             # It is the RMS of the torso's detrended mediolateral excursion.
-            "Torso medial-lateral displacement": float(synthgait["torso_ml_rms"]),
-            "Torso medial-lateral displacement range": float(synthgait["torso_ml_range"]),
-            # Explicit clinical label for the existing peak-to-peak lateral
-            # trunk excursion. Keep the older range name for saved JSON
-            # compatibility.
+            # Robust P95-P5 range of detrended mediolateral displacement.
             "Torso medial-lateral trunk motion ROM": float(synthgait["torso_ml_range"]),
         }
 
         samples = {
-            "stance_left": np.asarray(L_stance, dtype=float) / fps,
-            "stance_right": np.asarray(R_stance, dtype=float) / fps,
-            "swing_left": np.asarray(L_swing, dtype=float) / fps,
-            "swing_right": np.asarray(R_swing, dtype=float) / fps,
             "step_time_left": np.asarray(L_steptime, dtype=float) / fps,
             "step_time_right": np.asarray(R_steptime, dtype=float) / fps,
-            "double_support": np.asarray(all_double_support, dtype=float) / fps,
-            "step_length_left": np.asarray(sl_left, dtype=float),
-            "step_length_right": np.asarray(sl_right, dtype=float),
-            "velocity": np.asarray([avg_velocity], dtype=float),
-            "velocity_weight": np.asarray([(strikes[-1] - strikes[0]) / fps], dtype=float),
             "arm_correlation": np.asarray([synthgait["arm_swing_correlation"]], dtype=float),
             "arm_correlation_weight": np.asarray([len(keypoints_3D)], dtype=float),
             "synthgait_step_length": np.asarray(synthgait["step_lengths"], dtype=float),
@@ -322,19 +231,31 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
             "torso_ml_range": np.asarray([synthgait["torso_ml_range"]], dtype=float),
         }
 
+        for key in ("step_lengths", "step_widths", "step_speeds"):
+            sample_key = {"step_lengths": "synthgait_step_length", "step_widths": "step_width", "step_speeds": "step_speed"}[key]
+            for side, ankle_index in (("left", 6), ("right", 3)):
+                side_key = "step_width_sides" if key == "step_widths" else "step_sides"
+                samples[f"{sample_key}_{side}"] = synthgait[key][synthgait[side_key] == ankle_index]
+        samples.update(phase_time_samples(gait_event_dic, float(fps)))
+        samples.update(ankle_lift_samples(kp, gait_event_dic, float(fps)))
+        for key in ("arm_velocity_left", "arm_velocity_right", "torso_ml_velocity"):
+            samples[key] = synthgait[key]
+        results.update(extended_results(samples))
+
         return (results, samples) if return_samples else results
 
     @staticmethod
     def _synthgait_spatial_features(kp, lhs_idx, rhs_idx, fps=30.0):
-        """Calculate paper-compatible spatial features from a straight segment.
+        """Calculate ankle-based spatial estimates from a straight segment.
 
         The SynthGait-19K reference annotations use SMPL motion with a known
         forward axis.  VisionMD instead has camera-coordinate MeTRAbs poses, so
         for each already separated straight-walking segment we derive a local
         horizontal frame from net pelvis travel: ``forward`` follows the subject
-        and ``lateral`` is its horizontal perpendicular.  This lets away- and
-        toward-camera passes contribute to the same summary without changing the
-        published definitions.
+        and ``lateral`` is its horizontal perpendicular. Length, posture and
+        arm measures use that segment frame. Width instead uses each contacting
+        ankle relative to its bracketing opposite-foot progression line. All
+        spatial measures remain estimates in camera coordinates.
 
         Joint indices refer to ``_gait_phase_joint_order`` after reordering:
         pelvis=0, right ankle=3, left ankle=6, neck=8, spine=7,
@@ -381,13 +302,14 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
         # start-up and stopping behaviour as steady gait.
         events = [(int(frame), 6) for frame in lhs_idx] + [(int(frame), 3) for frame in rhs_idx]
         events.sort(key=lambda item: item[0])
-        event_positions, event_frames = [], []
+        event_positions, event_frames, event_sides = [], [], []
         previous_frame = None
         for frame, ankle_index in events:
             if frame == previous_frame:
                 continue
             event_positions.append(kp[frame, ankle_index])
             event_frames.append(frame)
+            event_sides.append(ankle_index)
             previous_frame = frame
         feet = np.asarray(event_positions, dtype=float)
         if len(feet) < 2:
@@ -397,7 +319,13 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
         if np.any(step_durations <= 0):
             raise ValueError("Heel strikes must be strictly ordered for step-speed calculation.")
         step_lengths = np.abs(step_vectors @ forward)
-        step_widths = np.abs(step_vectors @ lateral)
+        # GAITRite-style opposite-foot progression line, estimated from ankle
+        # contacts rather than measured heel centres. Requires R-L-R or L-R-L.
+        width_samples = foot_line_widths(
+            lhs_idx, kp[lhs_idx, 6][:, [0, 2]],
+            rhs_idx, kp[rhs_idx, 3][:, [0, 2]],
+        )
+        step_widths = width_samples["widths"]
         step_speeds = step_lengths / (step_durations / float(fps))
 
         # Equation 7--10: pelvis-centred wrist range and the forward neck--
@@ -410,8 +338,8 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
         centred_right_wrist = kp[analysis_slice, 16] - pelvis[analysis_slice]
         left_wrist_forward = centred_left_wrist @ forward
         right_wrist_forward = centred_right_wrist @ forward
-        left_arm_range = np.ptp(left_wrist_forward) / leg_length
-        right_arm_range = np.ptp(right_wrist_forward) / leg_length
+        left_arm_range = float(np.percentile(left_wrist_forward, 95) - np.percentile(left_wrist_forward, 5)) / leg_length
+        right_arm_range = float(np.percentile(right_wrist_forward, 95) - np.percentile(right_wrist_forward, 5)) / leg_length
         arm_swing = float((left_arm_range + right_arm_range) / 2.0)
         if np.std(left_wrist_forward) <= 1e-9 or np.std(right_wrist_forward) <= 1e-9:
             arm_swing_correlation = np.nan
@@ -427,12 +355,17 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
         trend = np.polyval(np.polyfit(frame_index, torso_lateral, 1), frame_index)
         torso_ml_deviation = torso_lateral - trend
         torso_ml_rms = float(np.sqrt(np.mean(torso_ml_deviation ** 2)))
-        torso_ml_range = float(np.ptp(torso_ml_deviation))
+        torso_ml_range = float(np.percentile(torso_ml_deviation, 95) - np.percentile(torso_ml_deviation, 5))
 
         return {
             "step_lengths": step_lengths,
             "step_widths": step_widths,
+            "step_width_sides": width_samples["sides"],
             "step_speeds": step_speeds,
+            "step_sides": np.asarray(event_sides[1:]),
+            "arm_velocity_left": velocity(left_wrist_forward, float(fps)),
+            "arm_velocity_right": velocity(right_wrist_forward, float(fps)),
+            "torso_ml_velocity": velocity(torso_ml_deviation, float(fps)),
             "stooped_posture": stooped_posture,
             "left_arm_swing": float(left_arm_range),
             "right_arm_swing": float(right_arm_range),
@@ -597,9 +530,11 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
             arrays = [array[np.isfinite(array)] for array in arrays if array.size]
             return np.concatenate(arrays) if arrays else np.asarray([], dtype=float)
 
-        def mean(name):
+        def mean(name, required=True):
             values = combine(name)
             if not values.size:
+                if not required:
+                    return float("nan")
                 raise ValueError(f"No samples available for {name}.")
             return float(values.mean())
 
@@ -609,34 +544,25 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
             # usable without constructing a second analyzer.
             return GaitSignalAnalyzer._sample_standard_deviation(combine(name))
 
-        left_stance, right_stance = combine("stance_left"), combine("stance_right")
-        left_swing, right_swing = combine("swing_left"), combine("swing_right")
         left_step, right_step = combine("step_time_left"), combine("step_time_right")
-        left_length, right_length = combine("step_length_left"), combine("step_length_right")
+        left_length, right_length = combine("synthgait_step_length_left"), combine("synthgait_step_length_right")
         all_steps = np.concatenate([left_step, right_step])
 
         def weighted_mean(value_name, weight_name):
             values, weights = combine(value_name), combine(weight_name)
             if not values.size or values.size != weights.size or not np.any(weights > 0):
-                return float(np.nanmean(values))
+                return float(values.mean()) if values.size else float("nan")
             return float(np.average(values, weights=weights))
 
         pooled = {
-            "Average stance time": float(np.concatenate([left_stance, right_stance]).mean()),
-            "Average swing time": float(np.concatenate([left_swing, right_swing]).mean()),
-            "Average double support time": mean("double_support"),
             "Average step time": float(all_steps.mean()),
-            "Average step length": float(np.concatenate([left_length, right_length]).mean()),
-            "Average velocity": weighted_mean("velocity", "velocity_weight"),
+            "Average step length": float((left_length.mean() + right_length.mean()) / 2) if left_length.size and right_length.size else float("nan"),
+            "Average velocity": float("nan"),
             "Average cadence": float(60.0 / all_steps.mean()),
-            "Average stance time left": float(left_stance.mean()),
-            "Average stance time right": float(right_stance.mean()),
-            "Average swing time left": float(left_swing.mean()),
-            "Average swing time right": float(right_swing.mean()),
             "Average step time left": float(left_step.mean()),
             "Average step time right": float(right_step.mean()),
-            "Average step length left": float(left_length.mean()),
-            "Average step length right": float(right_length.mean()),
+            "Average step length left": float(left_length.mean()) if left_length.size else float("nan"),
+            "Average step length right": float(right_length.mean()) if right_length.size else float("nan"),
             "Arm swing correlation": weighted_mean("arm_correlation", "arm_correlation_weight"),
         }
         # Keep this optional so historic cached analyses and narrow unit-test
@@ -646,8 +572,7 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
             torso_deviation = combine("torso_ml_deviation")
             torso_ranges = combine("torso_ml_range")
             pooled.update({
-                "SynthGait step length": mean("synthgait_step_length"),
-                "Step width": mean("step_width"),
+                "Step width": mean("step_width", required=False),
                 "Stooped posture": weighted_mean("stooped_posture", "stooped_posture_weight"),
                 "Arm swing left": weighted_mean("arm_swing_left", "arm_swing_weight"),
                 "Arm swing right": weighted_mean("arm_swing_right", "arm_swing_weight"),
@@ -658,10 +583,21 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
                 "Step length variability": sample_standard_deviation("synthgait_step_length"),
                 "Step width variability": sample_standard_deviation("step_width"),
                 "Step speed variability": sample_standard_deviation("step_speed"),
-                "Torso medial-lateral displacement": float(np.sqrt(np.mean(torso_deviation ** 2))),
-                "Torso medial-lateral displacement range": float(np.max(torso_ranges)),
-                "Torso medial-lateral trunk motion ROM": float(np.max(torso_ranges)),
+                "Torso medial-lateral trunk motion ROM": float(np.percentile(torso_deviation, 95) - np.percentile(torso_deviation, 5)),
             })
+        extra_keys = {key for item in sample_sets for key in item}
+        pooled.update(extended_results({key: combine(key) for key in extra_keys}))
+        # All diagnostic variability follows the same hierarchy; never pool
+        # observations across segment means or weight longer segments more.
+        for key, name, scale in (
+            ("step_time", "Step time variability (ms; estimated)", 1000),
+            ("synthgait_step_length", "Step length variability", 1),
+            ("step_speed", "Step speed variability", 1),
+            ("step_width", "Step width variability", 1),
+        ):
+            chunks = [{side: item.get(key + "_" + side, []) for side in ("left", "right")} for item in sample_sets]
+            stats = combine_segment_variability(chunks, minimum_per_side=2)
+            pooled[name] = stats["value"] * scale if stats["available"] else float("nan")
         return pooled
     # ------------------------------------------------------------------
     # --- END: Helper methods ---

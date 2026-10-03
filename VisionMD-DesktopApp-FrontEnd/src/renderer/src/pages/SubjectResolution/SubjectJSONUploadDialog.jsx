@@ -56,7 +56,7 @@ export default function JSONUploadDialog({ dialogOpen, setDialogOpen, handleJSON
       }
       const data = await response.json();
       console.log("Returned subject resolution data",data)
-      handleJSONUpload(true, data);
+      handleJSONUpload(true, data, true);
       setDialogOpen(false);
     } catch (error) {
       console.error('Failed to fetch projects:', error);

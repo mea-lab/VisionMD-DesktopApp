@@ -53,6 +53,22 @@ def probe_decoded_video_timing(input_path):
         raise RuntimeError("FFprobe could not determine decoded frame timing.")
     return frame_count, duration
 
+def probe_first_video_timestamp(input_path):
+    """Return the presentation timestamp of the first decoded video frame."""
+    cmd = [
+        get_ffprobe_path(), "-v", "error", "-select_streams", "v:0",
+        "-read_intervals", "%+#1",
+        "-show_entries", "frame=best_effort_timestamp_time",
+        "-of", "json", input_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"FFprobe timestamp check failed:\n{result.stderr}")
+    frames = json.loads(result.stdout).get("frames") or []
+    if not frames or frames[0].get("best_effort_timestamp_time") is None:
+        raise RuntimeError("FFprobe returned no decoded video timestamp.")
+    return float(frames[0]["best_effort_timestamp_time"])
+
 def is_vfr(input_path):
     ffmpeg_path = get_ffmpeg_path()
     ffmprobe_path = get_ffprobe_path()
@@ -82,9 +98,12 @@ def is_vfr(input_path):
 
 def convert_to_cfr(input_path, fps):
     print("Running conversion to cfr...")
-    if not is_vfr(input_path):
-        print("Video is CFR already, skipping conversion.")
+    first_timestamp = probe_first_video_timestamp(input_path)
+    if not is_vfr(input_path) and abs(first_timestamp) <= 0.001:
+        print("Video is already zero-based CFR, skipping conversion.")
         return
+    if abs(first_timestamp) > 0.001:
+        print(f"Rebasing first video timestamp from {first_timestamp:.6f}s to zero.")
 
     base, ext = os.path.splitext(input_path)
     ffmpeg_path = get_ffmpeg_path()
@@ -96,17 +115,22 @@ def convert_to_cfr(input_path, fps):
     # a different effective rate; forcing that nominal value drops frames.
     source_frame_count, source_duration = probe_decoded_video_timing(input_path)
     fps = source_frame_count / source_duration
-    vf_parts = [f"fps={fps:.12f}"]
-    vf_value = ",".join(vf_parts)
+    # Assign uniform timestamps without duplicating or dropping observations.
+    # One tick per frame avoids the source's coarse or irregular clock.
+    rate = f"{fps:.12f}"
+    vf_value = f"settb=expr=1/({rate}),setpts=N"
 
     cmd = [
         f'{ffmpeg_path}', '-y',
         '-i', input_path,
         '-vf', vf_value,
-        # ``-vsync`` was removed in FFmpeg 9; fps_mode is its supported
-        # per-output replacement and works with the bundled executable.
-        '-fps_mode', 'cfr',
+        # Encoder rate is explicit; synchronization must not resample frames.
+        '-enc_time_base', 'filter',
+        '-fps_mode', 'passthrough',
         '-c:v', 'libx264',
+        '-preset', 'medium',
+        '-tune', 'grain',
+        '-crf', '15',
         '-pix_fmt', 'yuv420p',
         '-c:a', 'copy',
         output_path
@@ -122,8 +146,19 @@ def convert_to_cfr(input_path, fps):
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg CFR conversion failed:\n{result.stderr.decode('utf-8')}")
     
-    os.remove(input_path)
-    os.rename(output_path, input_path)
+    converted_count, _ = probe_decoded_video_timing(output_path)
+    if converted_count != source_frame_count:
+        raise RuntimeError(
+            f"CFR normalization changed decoded frames from {source_frame_count} "
+            f"to {converted_count}; source file was preserved."
+        )
+    converted_start = probe_first_video_timestamp(output_path)
+    if abs(converted_start) > 0.001:
+        raise RuntimeError(
+            "CFR normalization did not produce zero-based video timestamps "
+            f"(first frame is {converted_start:.6f}s); source file was preserved."
+        )
+    os.replace(output_path, input_path)
 
 def convert_to_square_pixels(input_path):
     print("Running conversion to square pixels...")
@@ -198,7 +233,11 @@ def convert_to_square_pixels(input_path):
         "-i", input_path,
         "-vf", vf_filter,
         "-c:v", "libx264",
+        "-preset", "medium",
+        "-tune", "grain",
+        "-crf", "15",
         "-pix_fmt", "yuv420p",
+        "-fps_mode", "passthrough",
         "-c:a", "copy",
         output_path
     ]
@@ -259,7 +298,11 @@ def convert_to_h264_aac(input_path):
         f"{ffmpeg_path}", "-y",
         "-i", input_path,
         "-c:v", "libx264",
+        "-preset", "medium",
+        "-tune", "grain",
+        "-crf", "15",
         "-pix_fmt", "yuv420p",
+        "-fps_mode", "passthrough",
         "-profile:v", "main",
         "-level", "4.0",
         "-c:a", "aac",
@@ -326,15 +369,15 @@ def convert_to_mp4(input_path):
     else:
         output_path = target_path
 
+    # Earlier upload steps guarantee H.264/yuv420p video and AAC audio.
+    # A container change must be lossless: re-encoding here used to compress
+    # every non-MP4 upload twice and visibly softened fingertip detail.
     cmd = [
         f"{ffmpeg_path}", "-y",
         "-i", input_path,
-        "-c:v", "libx264",
-        "-pix_fmt", "yuv420p",
-        "-profile:v", "main",
-        "-level", "4.0",
-        "-c:a", "aac",
-        "-b:a", "128k",
+        "-map", "0:v:0",
+        "-map", "0:a:0?",
+        "-c", "copy",
         "-movflags", "+faststart",
         output_path,
     ]

@@ -1,6 +1,11 @@
 import numpy as np
 import scipy.signal as signal
 
+try:
+    from .cycle_selection import finalize_cycle_valleys, select_complete_cycles
+except ImportError:  # Standalone use, including TestNormalization.
+    from cycle_selection import finalize_cycle_valleys, select_complete_cycles
+
 
 def compareNeighboursNegative(item1, item2, distance, minDistance=5):
     """
@@ -860,7 +865,7 @@ def correctBasedonHeightandVelocityNegativePeaks(pos,distance,velocity, minDista
 
     return corrected
 
-def correctBasedonDistanceBetweenPeaks(
+def _legacyCorrectBasedonDistanceBetweenPeaks(
         peaks,
         distance,
         velocity,
@@ -1297,6 +1302,24 @@ def correctBasedonDistanceBetweenPeaks(
 
 
 
+def correctBasedonDistanceBetweenPeaks(
+        peaks,
+        distance,
+        velocity,
+        threshold=1.96,
+        fs=60.0,
+        meaningful_valley_fraction=0.20,
+):
+    """Select complete cycles globally while preserving the historical API.
+
+    ``threshold``, ``fs``, and ``meaningful_valley_fraction`` remain accepted
+    for callers of the former timing-based merger. Complete-cycle selection
+    derives robust prominence and duration scales directly from the recording.
+    """
+    _ = threshold, fs, meaningful_valley_fraction
+    return select_complete_cycles(peaks, distance, velocity)
+
+
 def peakFinder(rawSignal, fs=30.0, minDistance=5, cutOffFrequency=10.0, prct=0.125):
     """
     Identifies positive and negative velocity peaks in a raw signal and applies corrections
@@ -1486,11 +1509,14 @@ def peakFinder(rawSignal, fs=30.0, minDistance=5, cutOffFrequency=10.0, prct=0.1
     # indexNegativeVelocity = correctBasedonVelocityNegative(indexNegativeVelocity, velocity.copy())
 
     peaks = correctFullPeaks(distance, indexPositiveVelocity, indexNegativeVelocity)
-    peaks = correctBasedonDistanceBetweenPeaks(peaks, distance, velocity, threshold=1.96, fs=fs)
+    # Score complete cycles globally. The earlier symmetry functions operate on
+    # isolated half-lobes and can delete valid hesitation or asymmetric cycles,
+    # so complete-cycle selection supersedes those legacy post-filters.
+    peaks = correctBasedonDistanceBetweenPeaks(
+        peaks, distance, velocity, threshold=1.96, fs=fs
+    )
     peaks = correctHeadsandTails(peaks)
-    peaks = correctBasedonPeakSymmetry(peaks)
-    peaks = correctBasedonHeightSymmetry(peaks, distance)
-    peaks = correctBasedonHeightSymmetryRatio(peaks, distance)
+    peaks = finalize_cycle_valleys(peaks, distance)
 
 
 

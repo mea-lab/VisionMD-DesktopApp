@@ -285,7 +285,6 @@ const VideoPlayer = ({
                 fps={fps}
                 persons={persons}
                 tasks={tasks}
-                landMarks={tasks[selectedTask]?.data?.landMarks}
                 selectedTask={selectedTask}
                 isPlaying={isPlaying}
                 screen={screen}

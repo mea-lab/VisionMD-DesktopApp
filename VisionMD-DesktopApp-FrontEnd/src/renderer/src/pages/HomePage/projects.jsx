@@ -176,7 +176,13 @@ const VideoTile = ({ video, setVideos }) => {
       const snapshot = {
         format: 'visionmd-project',
         version: 1,
-        video: { name: video.metadata.video_name, fps: video.metadata.fps },
+        video: {
+          name: video.metadata.video_name,
+          fps: video.metadata.fps,
+          frame_count: video.metadata.frame_count,
+          duration: video.metadata.source_duration,
+          rotation: video.metadata.rotation,
+        },
         data: {
           fps: project.metadata?.fps ?? video.metadata.fps,
           persons: project.persons ?? [],

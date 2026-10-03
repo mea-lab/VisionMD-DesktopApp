@@ -14,6 +14,7 @@ from .joint_info import JointInfo
 from .models.metrabs import Metrabs
 from .multiperson.multiperson_model import Pose3dEstimator
 from .util import load_config
+from app.analysis.torch_device import preferred_device, run_with_device_fallback
 
 _MODEL_CACHE = {}
 MODEL_DOWNLOAD_URL = (
@@ -67,35 +68,43 @@ def load_model(model_dir, device=None):
     if missing:
         _download_model(model_dir)
 
-    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    cache_key = (str(model_dir.resolve()), str(device))
-    if cache_key in _MODEL_CACHE:
-        return _MODEL_CACHE[cache_key]
-    config = load_config(model_dir / "config.yaml")
-    joint_data = np.load(model_dir / "joint_info.npz")
-    joint_info = JointInfo(joint_data["joint_names"], joint_data["joint_edges"])
+    selected = preferred_device(device)
 
-    backbone_factory = getattr(efficientnet_pt, f"efficientnet_v2_{config.efficientnet_size}")
-    with torch.device(device):
-        backbone_raw = backbone_factory()
-        backbone = torch.nn.Sequential(efficientnet_pt.PreprocLayer(), backbone_raw.features)
-        crop_model = Metrabs(backbone, joint_info)
-        crop_model((
-            torch.zeros((1, 3, config.proc_side, config.proc_side), dtype=torch.float32),
-            torch.eye(3, dtype=torch.float32).unsqueeze(0),
-        ))
+    def load_on(active_device):
+        torch_device = torch.device(active_device)
+        cache_key = (str(model_dir.resolve()), str(torch_device))
+        if cache_key in _MODEL_CACHE:
+            return _MODEL_CACHE[cache_key]
+        config = load_config(model_dir / "config.yaml")
+        joint_data = np.load(model_dir / "joint_info.npz")
+        joint_info = JointInfo(joint_data["joint_names"], joint_data["joint_edges"])
 
-    state = torch.load(model_dir / "ckpt.pt", map_location=device, weights_only=True)
-    crop_model.load_state_dict(state)
-    crop_model.eval().to(device)
+        backbone_factory = getattr(efficientnet_pt, f"efficientnet_v2_{config.efficientnet_size}")
+        with torch.device(torch_device):
+            backbone_raw = backbone_factory()
+            backbone = torch.nn.Sequential(efficientnet_pt.PreprocLayer(), backbone_raw.features)
+            crop_model = Metrabs(backbone, joint_info)
+            crop_model((
+                torch.zeros((1, 3, config.proc_side, config.proc_side), dtype=torch.float32),
+                torch.eye(3, dtype=torch.float32).unsqueeze(0),
+            ))
 
-    with (model_dir / "skeleton_infos.pkl").open("rb") as stream:
-        skeleton_infos = pickle.load(stream)
-    joint_transform = np.load(model_dir / "joint_transform_matrix.npy")
+        state = torch.load(model_dir / "ckpt.pt", map_location="cpu", weights_only=True)
+        crop_model.load_state_dict(state)
+        crop_model.eval().to(torch_device)
 
-    with torch.device(device):
-        estimator = Pose3dEstimator(crop_model, skeleton_infos, joint_transform)
-    estimator.eval().to(device)
-    estimator.device = device
-    _MODEL_CACHE[cache_key] = estimator
-    return estimator
+        with (model_dir / "skeleton_infos.pkl").open("rb") as stream:
+            skeleton_infos = pickle.load(stream)
+        joint_transform = np.load(model_dir / "joint_transform_matrix.npy")
+
+        with torch.device(torch_device):
+            estimator = Pose3dEstimator(crop_model, skeleton_infos, joint_transform)
+        estimator.eval().to(torch_device)
+        estimator.device = torch_device
+        _MODEL_CACHE[cache_key] = estimator
+        return estimator
+
+    model, _actual_device = run_with_device_fallback(
+        load_on, selected, label="MeTRAbs model initialization"
+    )
+    return model

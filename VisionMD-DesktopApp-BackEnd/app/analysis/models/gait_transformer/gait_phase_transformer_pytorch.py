@@ -11,6 +11,7 @@ import os
 import h5py
 import numpy as np
 import torch
+from app.analysis.torch_device import preferred_device, run_with_device_fallback
 from torch import nn
 from torch.nn import functional as F
 
@@ -154,10 +155,17 @@ def _load_keras_weights(model, model_file):
 
 def load_default_model(pos_divider=None, device=None):
     model_file = os.path.join(os.path.dirname(__file__), "assets", "model_v0.2.h5")
-    device = torch.device(device or ("cuda" if torch.cuda.is_available() else "cpu"))
-    model = GaitPhaseStrideTransformer(pos_divider=pos_divider)
-    _load_keras_weights(model, model_file)
-    return model.eval().to(device)
+    selected = preferred_device(device)
+
+    def load_on(active_device):
+        model = GaitPhaseStrideTransformer(pos_divider=pos_divider)
+        _load_keras_weights(model, model_file)
+        return model.eval().to(active_device)
+
+    model, _actual_device = run_with_device_fallback(
+        load_on, selected, label="gait transformer initialization"
+    )
+    return model
 
 
 def shift_generator(keypoints3d, stride=1, L=90):

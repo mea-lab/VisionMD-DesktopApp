@@ -50,6 +50,9 @@ def test_turn_metadata_reports_angular_duration_and_absolute_frames():
         poses[:, right] = axis * 0.5
         poses[:, left] = -axis * 0.5
 
+    # Camera-depth reversal must corroborate the body orientation change.
+    poses[:, :, 2] += (3000 + 1000*np.sin(np.linspace(0, np.pi, frame_count)))[:, None]
+
     task = GaitTask()
     task.fps = fps
     task.start_frame_idx = 100
@@ -61,7 +64,7 @@ def test_turn_metadata_reports_angular_duration_and_absolute_frames():
     assert metadata["start_video_frame"] == 100 + metadata["start_frame"]
     assert metadata["end_video_frame"] == 100 + metadata["end_frame"]
     assert metadata["duration_seconds"] > 0
-    assert metadata["peak_angular_speed_degrees_per_second"] > 0
+    assert metadata["p95_angular_speed_degrees_per_second"] > 0
 
 
 def test_feature_pooling_uses_event_counts_not_segment_counts():
@@ -305,4 +308,19 @@ def test_gait_segment_endpoint_reuses_cached_model_outputs(monkeypatch):
     assert response.data["turning_metadata"]["start_frame"] == 60
     assert response.data["turning_metadata"]["end_frame"] == 120
     assert response.data["gait_quality"]["manual_segment_override"] is True
+    assert "Steady-step gait time SD (ms)" in response.data
+    assert "Steady-step width SD (m; estimated)" not in response.data
+    assert "Steady-step width within-segment SD (m; estimated)" in response.data
+    assert response.data["gait_quality"]["steady_step_width"]["boundary_exclusion_seconds"] == 2.0
+    assert response.data["gait_quality"]["steady_step_gait"]["boundary_exclusion_seconds"] == 2.0
     assert len(response.data["segment_metrics"]) == 2
+
+
+def test_turn_p95_speed_resists_one_frame_orientation_spike():
+    task = GaitTask(); task.fps = 30.; task.start_time = 0.; task.start_frame_idx = 0
+    yaw = np.linspace(0., 1., 100); yaw[50] += .2
+    task._body_yaw = lambda poses: yaw
+    result = task.measure_turn_range(np.zeros((100,17,3)),0,99)
+    peak = float(np.degrees(np.max(np.abs(np.gradient(yaw,1/30.)))))
+    assert result['p95_angular_speed_degrees_per_second'] < peak / 2
+    assert 'peak_angular_speed_degrees_per_second' not in result

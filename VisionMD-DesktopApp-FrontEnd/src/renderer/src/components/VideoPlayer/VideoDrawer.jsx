@@ -8,7 +8,6 @@ const VideoDrawer = ({
   fps,
   persons,
   tasks,
-  landMarks,
   selectedTask,
   style,
   displayWidth,
@@ -123,6 +122,7 @@ const VideoDrawer = ({
     const ctx = canvas.getContext('2d');
 
     const currentTask = tasks[selectedTask];
+    const landMarks = currentTask?.data?.landMarks;
     const landmarkFps = currentTask.data?.landmark_fps ?? fps;
     const startFrame = currentTask.data?.landmark_start_frame
       ?? Math.round(currentTask.start * landmarkFps);
@@ -147,7 +147,7 @@ const VideoDrawer = ({
       ctx.arc(lx , ly , radiusPx, 0, 2 * Math.PI);
       ctx.fill();
     });
-  }, [tasks, selectedTask, fps, landMarks, landmark_colors, displayWidth, displayHeight]);
+  }, [tasks, selectedTask, fps, landmark_colors]);
 
 
   // Modified drawFrame: we only draw bounding boxes when not in a taskBox time interval.
@@ -206,13 +206,18 @@ const VideoDrawer = ({
     }
   
     let frameCallbackId;
+    let cancelled = false;
     const render = (now, metadata) => {
+      if (cancelled) return;
       drawFrame(metadata.mediaTime);
-      frameCallbackId = video.requestVideoFrameCallback(render);
+      if (!cancelled) {
+        frameCallbackId = video.requestVideoFrameCallback(render);
+      }
     };
   
     frameCallbackId = video.requestVideoFrameCallback(render);  
     return () => {
+      cancelled = true;
       video.removeEventListener('loadedmetadata', setCanvasDimensions);
       if (video.cancelVideoFrameCallback) {
         video.cancelVideoFrameCallback(frameCallbackId);
@@ -225,7 +230,7 @@ const VideoDrawer = ({
     if (videoRef?.current) {
       drawFrame(videoRef.current.currentTime);
     }
-  }, [persons, tasks, landMarks, landmark_colors, selectedTask, screen, drawFrame, videoRef, isPlaying]);
+  }, [persons, tasks, landmark_colors, selectedTask, screen, drawFrame, videoRef, isPlaying]);
   
   return (
     <canvas

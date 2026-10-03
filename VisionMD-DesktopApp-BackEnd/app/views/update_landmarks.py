@@ -1,6 +1,7 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from django.http import Http404
+from app.analysis.analysis_quality import assess_analysis_quality
 import importlib
 import json
 
@@ -51,6 +52,19 @@ def update_landmarks(request):
 
     start_index = max(0, round((requested_start_time - cache_start_time) * fps))
     end_index = min(len(cached_essential_landmarks), round((requested_end_time - cache_start_time) * fps))
+    if json_data.get('persist_landmark_edits') is True:
+        submitted_landmarks = json_data.get('landmarks')
+        expected_frames = end_index - start_index
+        if not isinstance(submitted_landmarks, list):
+            raise ValueError('Manual landmark edits must include a landmarks array.')
+        if len(submitted_landmarks) != expected_frames:
+            raise ValueError(
+                f'Manual landmark edit contains {len(submitted_landmarks)} frames; '
+                f'the selected range contains {expected_frames}.'
+            )
+        cached_essential_landmarks = list(cached_essential_landmarks)
+        cached_essential_landmarks[start_index:end_index] = submitted_landmarks
+
     essential_landmarks = cached_essential_landmarks[start_index:end_index]
     all_landmarks = cached_all_landmarks[start_index:end_index]
     if len(essential_landmarks) < 2 or len(all_landmarks) < 2:
@@ -89,6 +103,8 @@ def update_landmarks(request):
         output["normalization_factor"] = normalization_factor
         output["landmark_start_frame"] = cache_start_frame + start_index
         output["landmark_fps"] = fps
+        if isinstance(json_data.get("landmarkQuality"), dict):
+            output["landmarkQuality"] = json_data["landmarkQuality"]
         # Preserve the complete detector output for later subrange changes.
         output["analysis_cache"] = {
             "start_time": cache_start_time,
@@ -98,6 +114,7 @@ def update_landmarks(request):
             "allLandMarks": cached_all_landmarks,
             "landmark_start_frame": cache_start_frame,
         }
+        output["analysisQuality"] = assess_analysis_quality(output)
     except:
         raise Http404(f"Something going wrong")
 

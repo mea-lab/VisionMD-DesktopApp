@@ -18,6 +18,17 @@ from rest_framework.response import Response
 
 from app.analysis.models.metrabs_pytorch.loader import load_model as load_metrabs_model
 from app.analysis.models.gait_transformer.gait_phase_transformer_pytorch import load_default_model, gait_phase_stride_inference
+from app.analysis.signal_analyzers.gait_steady_step import (
+    FEATURE_NAME as STEADY_STEP_FEATURE, BOUNDARY_SECONDS, UNAVAILABLE,
+    segment_step_times, summarize_step_times, segment_ankle_length_speed,
+)
+from app.analysis.signal_analyzers.gait_step_width import (
+    POOLED_FEATURE as WIDTH_POOLED_FEATURE, WITHIN_FEATURE as WIDTH_WITHIN_FEATURE,
+    STEADY_WIDTH_FEATURES, steady_width_samples, summarize_width,
+)
+from app.analysis.signal_analyzers.gait_segment_variability import combine_segment_variability
+from app.analysis.signal_analyzers.gait_reporting import public_features, diagnostic_features
+from app.analysis.torch_device import run_with_device_fallback
 
 
 
@@ -177,14 +188,11 @@ class GaitTask(BaseTask):
         return response
 
     def detect_turn(self, poses_3d, minimum_turn_degrees=75.0):
-        """Estimate one dominant body turn from the 3D shoulder/hip orientation.
+        """Confirm a dominant camera-depth reversal and local body turn.
 
-        MeTRAbs does not provide a turn label, so the yaw proxy is formed from
-        directed right-to-left shoulder and hip axes.  Only this one-dimensional
-        orientation trace is smoothed; the landmark coordinates used for gait
-        features remain untouched.  Turn boundaries are the 5% and 95% crossings
-        of the net orientation change, making the reported duration and angular
-        speeds independent of the walking speed toward or away from the camera.
+        Both near and far turns require sustained opposing depth trends and a
+        local orientation change. Straight walks and ambiguous candidates do
+        not receive an automatic exclusion window. Landmark data is unchanged.
         """
         poses = np.asarray(poses_3d, dtype=float)
         empty = {
@@ -198,7 +206,7 @@ class GaitTask(BaseTask):
             "duration_seconds": None,
             "angle_degrees": None,
             "mean_angular_speed_degrees_per_second": None,
-            "peak_angular_speed_degrees_per_second": None,
+            "p95_angular_speed_degrees_per_second": None,
             "direction": None,
         }
         if poses.ndim != 3 or len(poses) < 5:
@@ -208,26 +216,19 @@ class GaitTask(BaseTask):
         if yaw is None:
             return empty
 
-        plateau = max(2, min(len(yaw) // 5, int(round(float(self.fps) * 0.5))))
-        start_yaw = float(np.median(yaw[:plateau]))
-        end_yaw = float(np.median(yaw[-plateau:]))
-        delta = end_yaw - start_yaw
-        angle_degrees = float(np.degrees(delta))
-        if abs(angle_degrees) < minimum_turn_degrees:
-            return empty
-
-        signed_progress = (yaw - start_yaw) * np.sign(delta)
-        total = abs(delta)
-        start_candidates = np.flatnonzero(signed_progress >= 0.05 * total)
-        if not len(start_candidates):
-            return empty
-        start_frame = int(start_candidates[0])
-        end_candidates = np.flatnonzero(
-            (np.arange(len(yaw)) > start_frame) & (signed_progress >= 0.95 * total)
+        from app.analysis.signal_analyzers.gait_turn_detection import confirmed_turn_intervals
+        pelvis_index = int(np.where(self._metrabs_joint_order == "pelv")[0][0])
+        candidates = confirmed_turn_intervals(
+            poses[:, pelvis_index, 2], yaw, self.fps, minimum_turn_degrees
         )
-        if not len(end_candidates):
+        if not candidates:
             return empty
-        return self.measure_turn_range(poses, start_frame, int(end_candidates[0]))
+        # The existing result schema describes one dominant turn.
+        start, end, center, reversal = max(candidates, key=lambda item: item[3])
+        result = self.measure_turn_range(poses, start, end)
+        result["boundary_source"] = "Local orientation crossing with sustained pelvis-depth reversal"
+        result["depth_reversal_time_seconds"] = float(self.start_time + center / self.fps)
+        return result
 
     def _body_yaw(self, poses_3d):
         """Return the smoothed body-orientation trace used for turn analysis."""
@@ -273,7 +274,7 @@ class GaitTask(BaseTask):
         angle_degrees = float(np.degrees(delta))
         duration = (end_frame - start_frame) / float(self.fps)
         angular_velocity = np.gradient(yaw, 1.0 / float(self.fps))
-        peak_speed = float(np.degrees(np.max(np.abs(angular_velocity[start_frame:end_frame + 1]))))
+        p95_speed = float(np.degrees(np.percentile(np.abs(angular_velocity[start_frame:end_frame + 1]), 95)))
         return {
             "is_turning": True,
             "start_frame": start_frame,
@@ -285,7 +286,7 @@ class GaitTask(BaseTask):
             "duration_seconds": float(duration),
             "angle_degrees": angle_degrees,
             "mean_angular_speed_degrees_per_second": float(abs(angle_degrees) / duration),
-            "peak_angular_speed_degrees_per_second": peak_speed,
+            "p95_angular_speed_degrees_per_second": p95_speed,
             "direction": "positive_yaw" if delta > 0 else "negative_yaw",
         }
 
@@ -311,6 +312,9 @@ class GaitTask(BaseTask):
             candidate_ranges = [(0, frame_count)]
 
         original_samples, mirrored_samples = [], []
+        original_steady_steps, mirrored_steady_steps = [], []
+        original_steady_widths, mirrored_steady_widths = [], []
+        steady_spatial = {"original": [], "mirrored": []}
         original_events = {key: [] for key in ("left_down", "left_up", "right_down", "right_up")}
         mirrored_events = {key: [] for key in original_events}
         segment_metrics, segment_quality = [], []
@@ -344,6 +348,12 @@ class GaitTask(BaseTask):
                 })
                 continue
 
+            original_steady_steps.append(segment_step_times(events, end - start, self.fps))
+            mirrored_steady_steps.append(segment_step_times(mirrored_segment_events, end - start, self.fps))
+            original_steady_widths.append(steady_width_samples(events, poses[start:end], self.fps))
+            mirrored_steady_widths.append(steady_width_samples(mirrored_segment_events, poses_mirrored[start:end], self.fps))
+            steady_spatial["original"].append(segment_ankle_length_speed(events, poses[start:end], self.fps))
+            steady_spatial["mirrored"].append(segment_ankle_length_speed(mirrored_segment_events, poses_mirrored[start:end], self.fps))
             original_samples.append(samples)
             mirrored_samples.append(mirrored_segment_samples)
             for key in original_events:
@@ -373,15 +383,59 @@ class GaitTask(BaseTask):
         if not original_samples:
             raise ValueError("No straight-walking segment contained enough valid gait events.")
 
+        original_steady = summarize_step_times(original_steady_steps)
+        mirrored_steady = summarize_step_times(mirrored_steady_steps)
+        original_width = summarize_width(original_steady_widths)
+        mirrored_width = summarize_width(mirrored_steady_widths)
+        pooled_original = analyzer.pool_feature_samples(original_samples)
+        pooled_mirrored = analyzer.pool_feature_samples(mirrored_samples)
+        pooled_original[STEADY_STEP_FEATURE] = original_steady["value_ms"] if original_steady["available"] else UNAVAILABLE
+        pooled_mirrored[STEADY_STEP_FEATURE] = mirrored_steady["value_ms"] if mirrored_steady["available"] else UNAVAILABLE
+
+        for pooled, width in ((pooled_original, original_width), (pooled_mirrored, mirrored_width)):
+            pooled[WIDTH_WITHIN_FEATURE] = width["within_segment_sd_m"] if width["available"] else UNAVAILABLE
+
         return {
-            "results": analyzer.pool_feature_samples(original_samples),
-            "results_mirrored": analyzer.pool_feature_samples(mirrored_samples),
+            "results": pooled_original,
+            "results_mirrored": pooled_mirrored,
             "gait_event_dic": {key: np.asarray(value, dtype=float) for key, value in original_events.items()},
             "gait_event_dic_mirrored": {key: np.asarray(value, dtype=float) for key, value in mirrored_events.items()},
             "segment_metrics": segment_metrics,
             "quality": {
                 "turn_excluded_from_primary_results": bool(turning_metadata["is_turning"]),
                 "pooling_method": "all valid straight-walking events",
+                "steady_step_gait": {
+                    "boundary_exclusion_seconds": BOUNDARY_SECONDS,
+                    "method": "RMS of segment SDs, each segment SD is RMS of side sample SDs; equal segment weighting; average inference passes",
+                    "minimum_samples_per_side_per_pass": 5,
+                    "original": original_steady,
+                    "mirrored": mirrored_steady,
+                    "available": original_steady["available"] and mirrored_steady["available"],
+                },
+                "steady_step_spatial_diagnostics": {
+                    pass_name: {metric: combine_segment_variability([s[metric] for s in chunks])
+                                for metric in ("length", "speed")}
+                    for pass_name, chunks in steady_spatial.items()
+                },
+                "exploratory_gait_metrics": {
+                    "original": diagnostic_features(pooled_original),
+                    "mirrored": diagnostic_features(pooled_mirrored),
+                    "interpretation": "untrimmed SDs and asymmetry estimates are exploratory, not routine report measures",
+                },
+                "step_length_method": "ankle contact displacement along segment direction; equal-side mean",
+                "gait_speed_method": "ankle-derived step length divided by step time; equal-side mean",
+                "displacement_range_method": "P95 minus P5; arm amplitudes normalized by leg length",
+                "reported_width_variability": "within-segment steady-step SD only",
+                "step_width_definition": "ankle contact perpendicular to progression line through bracketing opposite-foot contacts; estimated camera-XZ plane",
+                "steady_step_width": {
+                    "boundary_exclusion_seconds": BOUNDARY_SECONDS,
+                    "minimum_samples_per_side_per_pass": 5,
+                    "pooled_sd_method": "RMS of separate-side sample SDs; includes segment-mean changes",
+                    "within_segment_sd_method": "RMS of segment SDs, each segment SD is RMS of side sample SDs; equal segment weighting",
+                    "original": original_width,
+                    "mirrored": mirrored_width,
+                    "available": original_width["available"] and mirrored_width["available"],
+                },
                 "segments": segment_quality,
             },
         }
@@ -399,7 +453,10 @@ class GaitTask(BaseTask):
 
     @staticmethod
     def _json_numbers(values):
-        return {key: float(value) if np.isfinite(value) else None for key, value in values.items()}
+        return {
+            key: value if isinstance(value, str) else float(value) if value is not None and np.isfinite(value) else None
+            for key, value in values.items()
+        }
 
     
 
@@ -621,8 +678,17 @@ class GaitTask(BaseTask):
 
         # Run inference
         height_arr = np.array(height_mm, dtype=float)
-        phases, strides = gait_phase_stride_inference(
-            keypoints, height_arr, gait_phase_transformer, int(L * pos_divider)
+        current_device = str(next(gait_phase_transformer.parameters()).device)
+        def infer(active_device):
+            gait_phase_transformer.to(active_device)
+            return gait_phase_stride_inference(
+                keypoints, height_arr, gait_phase_transformer, int(L * pos_divider)
+            )
+        (phases, strides), _actual_device = run_with_device_fallback(
+            infer,
+            current_device,
+            label="gait phase inference",
+            on_cpu_fallback=lambda: gait_phase_transformer.to("cpu"),
         )
             
         signals = {}
@@ -659,6 +725,27 @@ class GaitTask(BaseTask):
 
 
     def extract_landmarks(self, detector=None) -> tuple:
+        detector = detector or self.get_detector()
+        selected = str(detector.device)
+
+        def move_to_cpu():
+            model_path = os.path.join(
+                settings.BASE_DIR, 'app', 'analysis', 'models',
+                'metrabs_eff2l_384px_800k_28ds_pytorch'
+            )
+            GaitTask._metrabs_detector = load_metrabs_model(
+                model_path, device="cpu"
+            )
+
+        result, _actual_device = run_with_device_fallback(
+            lambda _active_device: self._extract_landmarks_once(),
+            selected,
+            label="MeTRAbs gait inference",
+            on_cpu_fallback=move_to_cpu,
+        )
+        return result
+
+    def _extract_landmarks_once(self) -> tuple:
         """
         Process video frames between start_frame and end_frame and extract hand landmarks 
         for the left hand from each frame — both normal and horizontally mirrored versions.
@@ -907,51 +994,33 @@ class GaitTask(BaseTask):
     # -------------------------------------------------------------
     # ----- Function for calculating the averages features of original and mirrored videos
     def calculate_average_features(self, original_features, mirrored_features):
-        average = {
-            "Average stance time": (original_features["Average stance time"] + mirrored_features["Average stance time"]) / 2.0,
-            "Average swing time": (original_features["Average swing time"] + mirrored_features["Average swing time"]) / 2.0,
-            "Average double support time": (original_features["Average double support time"] + mirrored_features["Average double support time"]) / 2.0,
-            "Average step time": (original_features["Average step time"] + mirrored_features["Average step time"]) / 2.0,
-            "Average step length": (original_features["Average step length"] + mirrored_features["Average step length"]) / 2.0,
-            "Average velocity": (original_features["Average velocity"] + mirrored_features["Average velocity"]) / 2.0,
-            "Average cadence": (original_features["Average cadence"] + mirrored_features["Average cadence"]) / 2.0,
-            "Average stance time left": (original_features["Average stance time left"] + mirrored_features["Average stance time right"]) / 2.0,
-            "Average stance time right": (original_features["Average stance time right"] + mirrored_features["Average stance time left"]) / 2.0,
-            "Average swing time left": (original_features["Average swing time left"] + mirrored_features["Average swing time right"]) / 2.0,
-            "Average swing time right": (original_features["Average swing time right"] + mirrored_features["Average swing time left"]) / 2.0,
-            "Average step time left": (original_features["Average step time left"] + mirrored_features["Average step time right"]) / 2.0,
-            "Average step time right": (original_features["Average step time right"] + mirrored_features["Average step time left"]) / 2.0,
-            "Average step length left": (original_features["Average step length left"] + mirrored_features["Average step length right"]) / 2.0,
-            "Average step length right": (original_features["Average step length right"] + mirrored_features["Average step length left"]) / 2.0,
-            "Arm swing correlation": (original_features["Arm swing correlation"] + mirrored_features["Arm swing correlation"]) / 2.0,
-        }
-        # A mirrored pass exchanges anatomical left/right. Preserve that
-        # relationship while averaging the new wrist-amplitude measures.
-        if "Arm swing left" in original_features and "Arm swing right" in mirrored_features:
-            average["Arm swing left"] = (
-                original_features["Arm swing left"] + mirrored_features["Arm swing right"]
-            ) / 2.0
-        if "Arm swing right" in original_features and "Arm swing left" in mirrored_features:
-            average["Arm swing right"] = (
-                original_features["Arm swing right"] + mirrored_features["Arm swing left"]
-            ) / 2.0
-        # SynthGait-compatible features are symmetric under the mirrored pass.
-        # They are optional to preserve compatibility with older imported JSON.
-        for name in (
-            "SynthGait step length",
-            "Step width",
-            "Stooped posture",
-            "Arm swing",
-            "Step length variability",
-            "Step width variability",
-            "Step speed variability",
-            "Torso medial-lateral displacement",
-            "Torso medial-lateral displacement range",
-            "Torso medial-lateral trunk motion ROM",
-        ):
-            if name in original_features and name in mirrored_features:
-                average[name] = (original_features[name] + mirrored_features[name]) / 2.0
-                
+        # Mirror augmentation exchanges anatomical sides. Include all added
+        # measures in the final response, not only a fixed historical key list.
+        average = {}
+        excluded = ("swing time", "stance time", "double support")
+        for name, original in public_features(original_features).items():
+            if "variability" in name.lower() and any(term in name.lower() for term in excluded):
+                continue
+            words = name.split(" ")
+            mirror_name = " ".join(
+                "right" if word == "left" else "left" if word == "right" else word
+                for word in words
+            )
+            if mirror_name not in mirrored_features:
+                continue
+            mirrored = mirrored_features[mirror_name]
+            if name in (STEADY_STEP_FEATURE, *STEADY_WIDTH_FEATURES) and (isinstance(original, str) or isinstance(mirrored, str)):
+                average[name] = UNAVAILABLE
+            elif isinstance(original, str):
+                average[name] = original
+            elif "valid swings" in name:
+                # Counts are QC metadata, not quantities to average into a
+                # fractional number of observations. Report the limiting pass.
+                average[name] = int(min(original, mirrored))
+            elif name == "Video frame interval (ms)":
+                average[name] = float(max(original, mirrored))
+            else:
+                average[name] = float((original + mirrored) / 2.0)
         return average
     
     ### ----- Function for interpolating missing poses -----

@@ -5,6 +5,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 
 from app.analysis.tasks.gait import GaitTask
+from app.analysis.signal_analyzers.gait_reporting import public_features
 
 
 @api_view(["POST"])
@@ -82,7 +83,7 @@ def update_gait_segments(request):
         )
         gait_events = analysis["gait_event_dic"]
 
-        output = dict(task_data)
+        output = public_features(task_data)
         output.update(averages)
         output["gait_event_dic"] = {
             key: value.tolist() for key, value in gait_events.items()

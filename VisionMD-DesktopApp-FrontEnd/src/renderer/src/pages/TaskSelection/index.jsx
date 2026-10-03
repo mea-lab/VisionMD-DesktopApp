@@ -128,6 +128,7 @@ const TaskSelection = () => {
             isVideoReady={videoReady}
             fileName={fileName}
             fps={fps}
+            frameCount={frameCount}
             boundingBoxes={boundingBoxes}
             persons={persons}
             tasks={tasks}

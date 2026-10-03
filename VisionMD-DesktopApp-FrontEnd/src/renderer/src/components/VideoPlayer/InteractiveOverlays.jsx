@@ -215,10 +215,9 @@ const InteractiveOverlays = ({
     e.stopPropagation();
     e.preventDefault();
     const svgPoint = getSVGPoint(e);
-    const taskBox = tasks[selectedTask];
     const currentLandmark = tasks[selectedTask].data.landMarks[landMarkIndex][landmarkIdx];
-    const circleCenterX = currentLandmark[0] + taskBox.x;
-    const circleCenterY = currentLandmark[1] + taskBox.y;
+    const circleCenterX = currentLandmark[0];
+    const circleCenterY = currentLandmark[1];
     const offsetX = svgPoint.x - circleCenterX;
     const offsetY = svgPoint.y - circleCenterY;
     draggingLandmarkRef.current = { landmarkIdx, offsetX, offsetY };
@@ -230,18 +229,17 @@ const InteractiveOverlays = ({
     if (!draggingLandmarkRef.current) return;
     const svgPoint = getSVGPoint(e);
     const { landmarkIdx, offsetX, offsetY } = draggingLandmarkRef.current;
-    const taskBox = tasks[selectedTask];
     const newCircleCenterX = svgPoint.x - offsetX;
     const newCircleCenterY = svgPoint.y - offsetY;
-    const newRelativeX = newCircleCenterX - taskBox.x;
-    const newRelativeY = newCircleCenterY - taskBox.y;
+    const newX = newCircleCenterX;
+    const newY = newCircleCenterY;
     setTasks((prevTasks) => {
       const newTasks = [...prevTasks];
       const task = { ...newTasks[selectedTask] };
       const data = { ...task.data };
       const newLandmarks = data.landMarks.slice();
       const currentFrameLandmarks = newLandmarks[landMarkIndex].slice();
-      currentFrameLandmarks[landmarkIdx] = [newRelativeX, newRelativeY];
+      currentFrameLandmarks[landmarkIdx] = [newX, newY];
       newLandmarks[landMarkIndex] = currentFrameLandmarks;
       data.landMarks = newLandmarks;
       task.data = data;
@@ -271,8 +269,9 @@ const InteractiveOverlays = ({
         start_time: start,
         end_time: end,
         fps,
+        ...data,
         landmarks: updatedLandmarks,
-        ...data
+        persist_landmark_edits: true
       });
       console.log("Uploaded Json", JSON.parse(jsonData));
       const uploadData = new FormData();

@@ -13,6 +13,7 @@ const HeaderSection = ({
   persons,
   fileName,
   fps,
+  frameCount,
   moveToNextScreen,
   tasks,
 }) => {
@@ -23,6 +24,7 @@ const HeaderSection = ({
     const fileData = {
       format: 'visionmd-project',
       version: 1,
+      video: { name: fileName, fps, frame_count: frameCount },
       data: { fps, persons, boundingBoxes, tasks },
     };
     

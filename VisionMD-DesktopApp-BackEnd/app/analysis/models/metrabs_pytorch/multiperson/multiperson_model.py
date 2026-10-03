@@ -26,7 +26,10 @@ class Pose3dEstimator(torch.nn.Module):
         # VisionMD already tracks the subject and supplies a box for every
         # frame, so the optional upstream YOLO detector is not loaded here.
         self.detector = detector
-        self.joint_transform_matrix = torch.tensor(joint_transform_matrix, dtype=torch.float32)
+        self.register_buffer(
+            "joint_transform_matrix",
+            torch.tensor(joint_transform_matrix, dtype=torch.float32),
+        )
 
         self.per_skeleton_indices = {
             k: torch.tensor(v['indices'], dtype=torch.int32)

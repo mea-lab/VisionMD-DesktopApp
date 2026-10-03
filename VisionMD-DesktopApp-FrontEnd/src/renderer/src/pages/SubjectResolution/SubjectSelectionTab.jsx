@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import PlayCircleOutline from '@mui/icons-material/PlayCircleOutline';
 import Button from '@mui/material/Button';
 import JSONUploadDialog from './SubjectJSONUploadDialog';
+import { prepareSubjectSelection } from './subjectSelection';
 
 
 const PersonRow = ({ person, onPlay, onToggleSubject }) => (
@@ -10,6 +11,7 @@ const PersonRow = ({ person, onPlay, onToggleSubject }) => (
       <div className="flex items-center">
         <PlayCircleOutline onClick={() => onPlay(person.timestamp)} className="cursor-pointer" />
         <span className="ml-2 font-medium">{person.name}</span>
+        {person.isSuggested && <span className="ml-2 text-xs text-emerald-300">Suggested</span>}
         <span className="ml-4 text-sm">{person.timestamp}</span>
       </div>
       <button
@@ -35,6 +37,7 @@ const SubjectSelectionTab = ({
   isVideoReady,
   setBoxesReady,
   boxesReady,
+  onAutoAdvance,
 }) => {
   const [openJsonUpload, setOpenJsonUpload] = useState(false);
 
@@ -66,22 +69,6 @@ const SubjectSelectionTab = ({
     setPersons(personArray);
   }, [boundingBoxes, persons.length, fps, setPersons]);
 
-  useEffect(() => {
-    if (persons.length === 1 && !persons[0].isSubject) {
-      setPersons(persons.map(person => ({ ...person, isSubject: true })));
-      setBoundingBoxes(prev =>
-        prev.map(frame => ({
-          ...frame,
-          data: frame.data.map(box =>
-            box.id === persons[0].id
-              ? { ...box, Subject: true }
-              : box
-          )
-        }))
-      );
-    }
-  }, [persons, setPersons]);
-
   const handlePlay = timestamp => {
     if (videoRef?.current && videoRef.current.readyState === 4) {
       videoRef.current.currentTime = parseFloat(timestamp) + 0.25;
@@ -109,13 +96,13 @@ const SubjectSelectionTab = ({
     );
   };
 
-  const jsonFileHandle = (jsonFileUploaded, jsonContent) => {
+  const jsonFileHandle = (jsonFileUploaded, jsonContent, automatic = false) => {
     if (jsonFileUploaded) {
-      setBoundingBoxes(jsonContent.boundingBoxes);
-      if (jsonContent.persons) {
-        setPersons(jsonContent.persons);
-      }
+      const selection = prepareSubjectSelection(jsonContent, fps, automatic);
+      setBoundingBoxes(selection.boundingBoxes);
+      setPersons(selection.persons);
       setBoxesReady(true);
+      if (selection.autoAdvance) onAutoAdvance();
     }
   };
 

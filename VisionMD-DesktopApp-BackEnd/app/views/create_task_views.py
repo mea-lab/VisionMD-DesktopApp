@@ -16,6 +16,9 @@ def execute_task(file_name: str, request):
     if key and request.GET.get("force") not in {"1", "true", "yes"}:
         cached = load_cached(video_id, key)
         if cached is not None:
+            # Quality checks are lightweight and may evolve independently of
+            # cached model inference. Never return a stale quality decision.
+            cached["analysisQuality"] = assess_analysis_quality(cached)
             cached["analysisRuntime"] = {
                 **cached.get("analysisRuntime", {}),
                 "cache_hit": True,
