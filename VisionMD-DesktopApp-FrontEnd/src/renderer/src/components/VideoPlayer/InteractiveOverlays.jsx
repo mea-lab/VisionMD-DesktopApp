@@ -272,7 +272,10 @@ const InteractiveOverlays = ({
         fps,
         ...data,
         landmarks: updatedLandmarks,
-        persist_landmark_edits: true
+        persist_landmark_edits: true,
+        norm_strategy: tasksRef.current[selectedTask].norm_strategy
+          || data.normalization_strategy
+          || (currentTaskName.startsWith('Hand Movement') ? 'PALMSIZE' : 'INDEXSIZE')
       });
       console.log("Uploaded Json", JSON.parse(jsonData));
       const uploadData = new FormData();
