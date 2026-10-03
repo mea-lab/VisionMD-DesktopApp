@@ -78,9 +78,19 @@ class FingerTapRightTask(BaseTask):
             self.prepare_video_parameters(request)
 
             # 2. Extract landmarks from video
-            essential_landmarks, all_landmarks = self.extract_landmarks()
-            essential_landmarks = self.interpolate_missing_landmarks(essential_landmarks)
-            all_landmarks = self.interpolate_missing_landmarks(all_landmarks)
+            _, all_landmarks = self.extract_landmarks()
+            all_landmarks, temporal_quality = self.repair_landmark_track(
+                all_landmarks, fps=self.video_fps, return_quality=True
+            )
+            all_landmarks, landmark_quality = self.repair_hand_fingertip_identity(
+                all_landmarks, fps=self.video_fps
+            )
+            landmark_quality["temporal_repair"] = temporal_quality
+            essential_landmarks = [
+                [frame[self.LANDMARKS["THUMB_TIP"]][:2],
+                 frame[self.LANDMARKS["INDEX_FINGER_TIP"]][:2]]
+                for frame in all_landmarks
+            ]
             
             # 3. Calculate normalization factor from landmarks
             normalization_factor = self.calculate_normalization_factor(all_landmarks)
@@ -101,6 +111,7 @@ class FingerTapRightTask(BaseTask):
             output["allLandMarks"] = all_landmarks
             output["normalization_factor"] = normalization_factor
             output["handSelectionQuality"] = self.hand_selection_quality
+            output["landmarkQuality"] = landmark_quality
 
         except Exception as e:
             return Response(f"{e}", status=500)

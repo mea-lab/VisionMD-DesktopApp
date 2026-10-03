@@ -184,6 +184,130 @@ class BaseTask(ABC):
         return repaired
 
     @staticmethod
+    def repair_hand_fingertip_identity(
+        landmarks,
+        fps=30.0,
+        max_repair_run_seconds=0.12,
+        margin_threshold=0.02,
+    ):
+        """Repair brief finger-tip identity failures and report detector quality.
+
+        A valid fingertip should remain closest to its own DIP joint. MediaPipe
+        occasionally attaches a fingertip to a neighbouring finger during
+        occlusion. Only short, unambiguous violations are interpolated; longer
+        intervals remain visible and force a quality-review recommendation.
+        """
+        values = np.asarray(landmarks, dtype=float)
+        if values.ndim != 3 or values.shape[1] < 21 or values.shape[2] < 2:
+            raise ValueError("Hand quality checks require frames with 21 landmarks.")
+        if len(values) < 3:
+            quality = {
+                "version": "visionmd-hand-landmark-quality-v2",
+                "pass": False,
+                "reasons": ["Too few frames for hand-landmark continuity checks"],
+                "identity_violation_frame_count": 0,
+                "identity_violation_fraction": 0.0,
+                "repaired_identity_frame_count": 0,
+                "long_identity_violation_frame_count": 0,
+                "fallback_recommended": True,
+                "recommended_engine": None,
+            }
+            return values.tolist(), quality
+
+        xy = values[:, :, :2]
+        tips = np.asarray([8, 12, 16, 20])
+        dips = np.asarray([7, 11, 15, 19])
+        mcps = np.asarray([5, 9, 13, 17])
+        palm = np.median(
+            np.linalg.norm(xy[:, mcps] - xy[:, [0]], axis=2), axis=1
+        )
+        finite_scale = palm[np.isfinite(palm) & (palm > 1e-6)]
+        fallback_scale = float(np.median(finite_scale)) if finite_scale.size else 1.0
+        palm = np.where(np.isfinite(palm) & (palm > 1e-6), palm, fallback_scale)
+
+        distances = np.linalg.norm(
+            xy[:, tips, None, :] - xy[:, None, dips, :], axis=3
+        )
+        own = distances[:, np.arange(4), np.arange(4)]
+        other_distances = distances.copy()
+        other_distances[:, np.arange(4), np.arange(4)] = np.inf
+        nearest_other = np.min(other_distances, axis=2)
+        violations = (own - nearest_other) / palm[:, None] > margin_threshold
+
+        # The thumb can touch the index during normal tapping, so it needs
+        # combined temporal/anatomical evidence rather than nearest-DIP alone.
+        from app.analysis.detectors.hand_thumb_continuity import thumb_identity_jump_mask
+        thumb_violations, thumb_branch_spikes = thumb_identity_jump_mask(
+            values, palm, fps=fps, max_run_seconds=max_repair_run_seconds
+        )
+        violations = np.column_stack((violations, thumb_violations))
+        tips = np.append(tips, 4)
+        repair_mask = np.zeros_like(violations)
+        long_mask = np.zeros_like(violations)
+        max_run = max(1, int(round(float(fps or 30.0) * max_repair_run_seconds)))
+        for finger_index in range(len(tips)):
+            indices = np.flatnonzero(violations[:, finger_index])
+            for run in np.split(indices, np.where(np.diff(indices) > 1)[0] + 1):
+                if not len(run):
+                    continue
+                bounded = run[0] > 0 and run[-1] < len(values) - 1
+                target = repair_mask if len(run) <= max_run and bounded else long_mask
+                target[run, finger_index] = True
+
+        corrected = values.copy()
+        frame_axis = np.arange(len(values))
+        for finger_index, tip_index in enumerate(tips):
+            invalid = repair_mask[:, finger_index]
+            if not invalid.any():
+                continue
+            valid = ~violations[:, finger_index] & np.all(np.isfinite(corrected[:, tip_index]), axis=1)
+            if not valid.any():
+                continue
+            for coordinate in range(corrected.shape[2]):
+                corrected[invalid, tip_index, coordinate] = np.interp(
+                    frame_axis[invalid], frame_axis[valid],
+                    corrected[valid, tip_index, coordinate]
+                )
+
+        # When the entire thumb branch jumps, repair its joints consistently,
+        # not just the displayed tip; THUMBSIZE also depends on these joints.
+        branch_repair = repair_mask[:, -1] & thumb_branch_spikes
+        for joint in (1, 2, 3):
+            valid = ~thumb_violations & np.all(np.isfinite(values[:, joint]), axis=1)
+            for coordinate in range(corrected.shape[2]):
+                if branch_repair.any() and valid.any():
+                    corrected[branch_repair, joint, coordinate] = np.interp(
+                        frame_axis[branch_repair], frame_axis[valid], values[valid, joint, coordinate]
+                    )
+
+        violation_frames = np.any(violations, axis=1)
+        repaired_frames = np.any(repair_mask, axis=1)
+        long_frames = np.any(long_mask, axis=1)
+        violation_fraction = float(np.mean(violation_frames))
+        passed = not bool(long_frames.any())
+        reasons = []
+        if long_frames.any():
+            reasons.append("A sustained finger-identity failure could not be repaired safely")
+        if not passed:
+            reasons.append("Manual review or comparison with an alternative estimator is recommended")
+        quality = {
+            "version": "visionmd-hand-landmark-quality-v2",
+            "pass": passed,
+            "reasons": reasons,
+            "identity_violation_frame_count": int(violation_frames.sum()),
+            "identity_violation_fraction": violation_fraction,
+            "repaired_identity_frame_count": int(repaired_frames.sum()),
+            "long_identity_violation_frame_count": int(long_frames.sum()),
+            "thumb_identity_violation_frame_count": int(thumb_violations.sum()),
+            "repaired_thumb_frame_count": int(repair_mask[:, -1].sum()),
+            "unrepaired_thumb_frame_count": int(long_mask[:, -1].sum()),
+            "fallback_recommended": not passed,
+            "recommended_engine": None,
+        }
+        return corrected.tolist(), quality
+
+
+    @staticmethod
     def repair_landmark_track(
         landmarks,
         fps=30.0,
