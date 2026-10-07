@@ -1,6 +1,13 @@
-import { useEffect, useState } from 'react';
-import Plot from 'react-plotly.js';
-import  CloudDownload from '@mui/icons-material/CloudDownload';
+import { useRef, useState } from 'react';
+import {
+  PolarAngleAxis,
+  PolarGrid,
+  PolarRadiusAxis,
+  Radar,
+  RadarChart,
+  ResponsiveContainer,
+} from 'recharts';
+import CloudDownload from '@mui/icons-material/CloudDownload';
 import Button from '@mui/material/Button';
 
 const ScatterPlot = ({ tasks, selectedTaskIndex, fileName }) => {
@@ -8,49 +15,15 @@ const ScatterPlot = ({ tasks, selectedTaskIndex, fileName }) => {
   const { radarTable } = currentTask.data;
   const currentTaskName = currentTask.name;
 
-  const [plotlyData, setPlotlyData] = useState([]);
-  const [plotlyLayout, setPlotlyLayout] = useState({});
-  const [plotlyConfig, setPlotlyConfig] = useState({});
   const [tableView, setTableView] = useState(true);
-
-  useEffect(() => {
-    const features = Object.keys(radarTable);
-    const values = Object.values(radarTable);
-
-    setPlotlyData([
-      {
-        type: 'scatterpolar',
-        r: values,
-        theta: features,
-        fill: 'toself',
-        name: currentTaskName,
-      },
-    ]);
-
-    setPlotlyLayout({
-      polar: {
-        radialaxis: { visible: true, autorange: true, tickfont: { color: '#f3f4f6' }},
-        angularaxis: { tickfont: { color: '#f3f4f6' },},
-      },
-      showlegend: false,
-      autosize: false,
-      height: 600,
-      width: 600,
-      plot_bgcolor: 'transparent',
-      paper_bgcolor: 'transparent',
-      font: { size: 7 },
-      automargin: true,
-    });
-
-    setPlotlyConfig({
-      modeBarButtonsToRemove: ['zoom2d', 'select2d', 'lasso2d', 'resetScale2d'],
-      responsive: true,
-      displaylogo: false,
-      toImageButtonOptions: {
-        filename: (fileName ? fileName.replace(/\.[^/.]+$/, '') : currentTaskName) + '_radarPlot',
-      },
-    });
-  }, [radarTable, currentTaskName, fileName]);
+  const radarRef = useRef(null);
+  const radarData = Object.entries(radarTable).map(([feature, value]) => ({
+    feature,
+    value: Number.isFinite(Number(value)) ? Number(value) : 0,
+  }));
+  const downloadBaseName = fileName
+    ? fileName.replace(/\.[^/.]+$/, '')
+    : currentTaskName;
 
   const showTable = () => setTableView(true);
   const showPlot = () => setTableView(false);
@@ -67,6 +40,24 @@ const ScatterPlot = ({ tasks, selectedTaskIndex, fileName }) => {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
+  };
+
+  const downloadRadar = () => {
+    const svg = radarRef.current?.querySelector('svg');
+    if (!svg) return;
+    const copy = svg.cloneNode(true);
+    copy.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    const blob = new Blob([new XMLSerializer().serializeToString(copy)], {
+      type: 'image/svg+xml;charset=utf-8',
+    });
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = `${downloadBaseName}_radarPlot.svg`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.setTimeout(() => URL.revokeObjectURL(href), 0);
   };
 
   return (
@@ -131,8 +122,37 @@ const ScatterPlot = ({ tasks, selectedTaskIndex, fileName }) => {
           </div>
         </div>
       ) : (
-        <div className="flex justify-center">
-        <Plot data={plotlyData} layout={plotlyLayout} config={plotlyConfig} />
+        <div className="flex flex-col items-center">
+          <div ref={radarRef} className="h-[600px] w-full max-w-[700px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <RadarChart data={radarData} outerRadius="75%">
+                <PolarGrid stroke="#71717a" />
+                <PolarAngleAxis
+                  dataKey="feature"
+                  tick={{ fill: '#f3f4f6', fontSize: 11 }}
+                />
+                <PolarRadiusAxis
+                  domain={[0, 'auto']}
+                  tick={{ fill: '#d4d4d8', fontSize: 10 }}
+                />
+                <Radar
+                  name={currentTaskName}
+                  dataKey="value"
+                  stroke="#1976d2"
+                  fill="#1976d2"
+                  fillOpacity={0.45}
+                />
+              </RadarChart>
+            </ResponsiveContainer>
+          </div>
+          <Button
+            variant="contained"
+            onClick={downloadRadar}
+            startIcon={<CloudDownload />}
+            sx={{ mb: 2, textTransform: 'none', fontWeight: 'bold' }}
+          >
+            Download plot
+          </Button>
         </div>
       )}
     </div>

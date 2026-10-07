@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useReducer } from 'react';
-import Plot from 'react-plotly.js';
+import Plot from '../../../components/Plots/CartesianPlot';
 import Button from '@mui/material/Button';
 import AnalysisRangePanel from '../AnalysisRangePanel';
 import { useTheme } from '../../../contexts/ThemeContext';

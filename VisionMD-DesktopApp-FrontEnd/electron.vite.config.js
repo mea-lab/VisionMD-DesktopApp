@@ -15,6 +15,9 @@ export default defineConfig({
   renderer: {
     root: join(__dirname, 'src/renderer'),
     plugins: [react()],
+    build: {
+      minify: 'esbuild',
+    },
     resolve: {
       alias: {
         '@': join(__dirname, 'src/renderer/src')
