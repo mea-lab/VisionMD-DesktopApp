@@ -3,6 +3,11 @@ import json
 from rest_framework.test import APIRequestFactory
 
 from app.analysis.signal_analyzers.gait_signal_analyzer import GaitSignalAnalyzer
+from app.analysis.signal_analyzers.gait_spatial_calibration import (
+    HEIGHT_CALIBRATION_COEFFICIENT,
+    height_spatial_calibration,
+    scale_length_speed_samples,
+)
 from app.analysis.tasks.base_task import BaseTask
 from app.analysis.tasks.gait import GaitTask
 from app.views.update_gait_segments import update_gait_segments
@@ -94,6 +99,89 @@ def test_feature_pooling_uses_event_counts_not_segment_counts():
     expected = (10.0 + 6.0) / 12.0
     assert np.isclose(pooled["Average step time"], expected)
     assert not np.isclose(pooled["Average step time"], 2.0)
+
+
+def test_height_spatial_calibration_uses_median_head_to_ankle_stature():
+    poses = np.zeros((5, 17, 3), dtype=float)
+    poses[:, 0, 1] = np.asarray([1700, 1700, 1700, 1700, 2500], dtype=float)
+
+    calibration = height_spatial_calibration(poses, height_cm=170)
+
+    assert np.isclose(calibration["model_straight_stature_m"], 1.7)
+    assert np.isclose(calibration["scale_factor"], HEIGHT_CALIBRATION_COEFFICIENT)
+    assert calibration["source_pose_pass"] == "original"
+    assert calibration["applied_to"] == ["step_length", "step_speed"]
+
+
+def test_height_spatial_scale_changes_only_length_and_speed_samples():
+    samples = {
+        "synthgait_step_length": np.asarray([0.5, 0.7]),
+        "synthgait_step_length_left": np.asarray([0.5]),
+        "step_speed_right": np.asarray([1.2]),
+        "step_width": np.asarray([0.15]),
+        "step_time_left": np.asarray([0.6]),
+    }
+
+    scaled = scale_length_speed_samples(samples, 0.8)
+
+    assert np.allclose(scaled["synthgait_step_length"], [0.4, 0.56])
+    assert np.allclose(scaled["synthgait_step_length_left"], [0.4])
+    assert np.allclose(scaled["step_speed_right"], [0.96])
+    assert np.array_equal(scaled["step_width"], samples["step_width"])
+    assert np.array_equal(scaled["step_time_left"], samples["step_time_left"])
+
+
+def test_straight_segment_analysis_applies_one_scale_to_both_pose_passes():
+    class StubAnalyzer:
+        @staticmethod
+        def analyze(phases, strides, poses, fps, return_details=False):
+            events = {
+                "left_down": np.asarray([10.0, 40.0]),
+                "left_up": np.asarray([20.0, 50.0]),
+                "right_down": np.asarray([25.0, 55.0]),
+                "right_up": np.asarray([35.0, 65.0]),
+            }
+            samples = {
+                "step_time_left": np.asarray([0.5, 0.5]),
+                "step_time_right": np.asarray([0.5, 0.5]),
+                "synthgait_step_length": np.asarray([0.5, 0.7]),
+                "synthgait_step_length_left": np.asarray([0.5]),
+                "synthgait_step_length_right": np.asarray([0.7]),
+                "step_speed": np.asarray([1.0, 1.4]),
+                "step_speed_left": np.asarray([1.0]),
+                "step_speed_right": np.asarray([1.4]),
+                "arm_correlation": np.asarray([0.0]),
+                "arm_correlation_weight": np.asarray([len(poses)]),
+            }
+            result = GaitSignalAnalyzer.pool_feature_samples([samples])
+            return result, events, samples, {"used_cleaned_events": True}
+
+        pool_feature_samples = staticmethod(GaitSignalAnalyzer.pool_feature_samples)
+
+    task = GaitTask()
+    task.fps = 30.0
+    task.start_frame_idx = 0
+    poses = np.zeros((90, 17, 3), dtype=float)
+    poses[:, 14, 2] = np.arange(90) * 10.0
+    calibration = {"version": "test", "scale_factor": 0.8}
+
+    analysis = task.analyze_straight_walking_segments(
+        StubAnalyzer(),
+        np.zeros((90, 8)),
+        np.zeros((90, 9)),
+        poses,
+        np.zeros((90, 8)),
+        np.zeros((90, 9)),
+        poses.copy(),
+        {"is_turning": False},
+        spatial_calibration=calibration,
+    )
+
+    assert np.isclose(analysis["results"]["Average step length"], 0.48)
+    assert np.isclose(analysis["results"]["Average velocity"], 0.96)
+    assert np.isclose(analysis["results_mirrored"]["Average step length"], 0.48)
+    assert np.isclose(analysis["results"]["Average step time"], 0.5)
+    assert analysis["quality"]["spatial_calibration"] == calibration
 
 
 def test_turn_interval_is_excluded_and_event_frames_are_restored():
@@ -287,6 +375,7 @@ def test_gait_segment_endpoint_reuses_cached_model_outputs(monkeypatch):
         "strides": np.zeros((frame_count, 9)).tolist(),
         "phases_mirrored": np.zeros((frame_count, 8)).tolist(),
         "strides_mirrored": np.zeros((frame_count, 9)).tolist(),
+        "spatial_calibration": {"version": "test", "scale_factor": 0.8},
     }
     payload = {
         "task_data": {"File name": "gait.mp4", "gait_analysis_cache": cache},
@@ -313,6 +402,7 @@ def test_gait_segment_endpoint_reuses_cached_model_outputs(monkeypatch):
     assert "Steady-step width within-segment SD (m; estimated)" in response.data
     assert response.data["gait_quality"]["steady_step_width"]["boundary_exclusion_seconds"] == 2.0
     assert response.data["gait_quality"]["steady_step_gait"]["boundary_exclusion_seconds"] == 2.0
+    assert response.data["gait_quality"]["spatial_calibration"] == cache["spatial_calibration"]
     assert len(response.data["segment_metrics"]) == 2
 
 

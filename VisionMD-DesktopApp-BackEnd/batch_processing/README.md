@@ -30,6 +30,12 @@ candidate is processed by VisionMD's existing task class. Candidates that fail
 the task/pose pipeline are discarded; accepted candidates are ranked by signal
 amplitude, peak count, and dominant-frequency feature.
 
+Participant height also calibrates gait step length and speed. VisionMD applies
+the versioned wearable-validation factor recorded in
+`gait_quality.spatial_calibration`; timing, cadence, and step width are not
+rescaled. The same metadata is stored in `gait_analysis_cache` so editing a turn
+interval reproduces the original calibration without rerunning pose estimation.
+
 Only the highest-ranked valid subject is exported. Candidate evaluation stays
 internal; output filenames and the summary manifest contain no candidate list
 or candidate-specific duplicates.

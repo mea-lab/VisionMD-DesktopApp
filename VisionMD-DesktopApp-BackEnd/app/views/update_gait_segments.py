@@ -45,6 +45,7 @@ def update_gait_segments(request):
         task.fps = fps
         task.start_time = start_time
         task.start_frame_idx = start_frame_idx
+        spatial_calibration = cache.get("spatial_calibration")
 
         selected = payload.get("turning_segment") or {}
         if bool(selected.get("is_turning")):
@@ -77,6 +78,7 @@ def update_gait_segments(request):
             strides_mirrored,
             poses_mirrored,
             turning_metadata,
+            spatial_calibration=spatial_calibration,
         )
         averages = task.calculate_average_features(
             analysis["results"], analysis["results_mirrored"]

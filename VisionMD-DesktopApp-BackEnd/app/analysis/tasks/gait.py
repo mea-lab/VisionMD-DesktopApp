@@ -28,6 +28,12 @@ from app.analysis.signal_analyzers.gait_step_width import (
 )
 from app.analysis.signal_analyzers.gait_segment_variability import combine_segment_variability
 from app.analysis.signal_analyzers.gait_reporting import public_features, diagnostic_features
+from app.analysis.signal_analyzers.gait_spatial_calibration import (
+    height_spatial_calibration,
+    scale_length_speed_results,
+    scale_length_speed_samples,
+    scale_steady_spatial_samples,
+)
 from app.analysis.torch_device import run_with_device_fallback
 
 
@@ -118,6 +124,9 @@ class GaitTask(BaseTask):
             self._check_cancelled()
             self._progress(90, "Calculating gait measures…")
             signal_analyzer = self.get_signal_analyzer()
+            spatial_calibration = height_spatial_calibration(
+                landmarks['poses3d'], self.height_cm
+            )
             # Use the anatomical labels exactly as MeTRAbs produced them for
             # orientation.  The continuity-based left/right correction used by
             # gait inference can intentionally swap labels as a person turns and
@@ -132,6 +141,7 @@ class GaitTask(BaseTask):
                 strides_mirrored,
                 landmarks_mirrored['poses3d'],
                 turning_metadata,
+                spatial_calibration=spatial_calibration,
             )
             results = analysis["results"]
             results_mirrored = analysis["results_mirrored"]
@@ -176,6 +186,7 @@ class GaitTask(BaseTask):
                 'strides': strides.tolist(),
                 'phases_mirrored': phases_mirrored.tolist(),
                 'strides_mirrored': strides_mirrored.tolist(),
+                'spatial_calibration': spatial_calibration,
             }
         except Exception as e:
             traceback.print_exc()
@@ -300,8 +311,13 @@ class GaitTask(BaseTask):
         strides_mirrored,
         poses_mirrored,
         turning_metadata,
+        spatial_calibration=None,
     ):
         """Analyze non-turning portions and pool their individual gait events."""
+        spatial_calibration = spatial_calibration or {"scale_factor": 1.0}
+        spatial_scale = float(spatial_calibration.get("scale_factor", 1.0))
+        if not np.isfinite(spatial_scale) or spatial_scale <= 0:
+            raise ValueError("Gait spatial calibration scale must be positive and finite.")
         frame_count = len(poses)
         if turning_metadata["is_turning"]:
             candidate_ranges = [
@@ -352,8 +368,18 @@ class GaitTask(BaseTask):
             mirrored_steady_steps.append(segment_step_times(mirrored_segment_events, end - start, self.fps))
             original_steady_widths.append(steady_width_samples(events, poses[start:end], self.fps))
             mirrored_steady_widths.append(steady_width_samples(mirrored_segment_events, poses_mirrored[start:end], self.fps))
-            steady_spatial["original"].append(segment_ankle_length_speed(events, poses[start:end], self.fps))
-            steady_spatial["mirrored"].append(segment_ankle_length_speed(mirrored_segment_events, poses_mirrored[start:end], self.fps))
+            steady_spatial["original"].append(scale_steady_spatial_samples(
+                segment_ankle_length_speed(events, poses[start:end], self.fps), spatial_scale
+            ))
+            steady_spatial["mirrored"].append(scale_steady_spatial_samples(
+                segment_ankle_length_speed(mirrored_segment_events, poses_mirrored[start:end], self.fps), spatial_scale
+            ))
+            result = scale_length_speed_results(result, spatial_scale)
+            mirrored_result = scale_length_speed_results(mirrored_result, spatial_scale)
+            samples = scale_length_speed_samples(samples, spatial_scale)
+            mirrored_segment_samples = scale_length_speed_samples(
+                mirrored_segment_samples, spatial_scale
+            )
             original_samples.append(samples)
             mirrored_samples.append(mirrored_segment_samples)
             for key in original_events:
@@ -404,6 +430,7 @@ class GaitTask(BaseTask):
             "quality": {
                 "turn_excluded_from_primary_results": bool(turning_metadata["is_turning"]),
                 "pooling_method": "all valid straight-walking events",
+                "spatial_calibration": spatial_calibration,
                 "steady_step_gait": {
                     "boundary_exclusion_seconds": BOUNDARY_SECONDS,
                     "method": "RMS of segment SDs, each segment SD is RMS of side sample SDs; equal segment weighting; average inference passes",
@@ -422,8 +449,8 @@ class GaitTask(BaseTask):
                     "mirrored": diagnostic_features(pooled_mirrored),
                     "interpretation": "untrimmed SDs and asymmetry estimates are exploratory, not routine report measures",
                 },
-                "step_length_method": "ankle contact displacement along segment direction; equal-side mean",
-                "gait_speed_method": "ankle-derived step length divided by step time; equal-side mean",
+                "step_length_method": "height-calibrated ankle contact displacement along segment direction; equal-side mean",
+                "gait_speed_method": "height-calibrated ankle-derived step length divided by step time; equal-side mean",
                 "displacement_range_method": "P95 minus P5; arm amplitudes normalized by leg length",
                 "reported_width_variability": "within-segment steady-step SD only",
                 "step_width_definition": "ankle contact perpendicular to progression line through bracketing opposite-foot contacts; estimated camera-XZ plane",
