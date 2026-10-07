@@ -1,14 +1,13 @@
 // src/constants/taskOptions.jsx
 
-// 1) Glob in all the JSX files from both folders
 const taskDetailsFiles = import.meta.glob(
   '../pages/TaskDetails/Tasks/*.jsx'
 );
-const taskSelectionFiles = import.meta.glob(
-  '../pages/TaskSelection/Tasks/*.jsx'
-);
+const taskSelectionFiles = import.meta.glob([
+  '../pages/TaskSelection/Tasks/*.jsx',
+  '!../pages/TaskSelection/Tasks/default.jsx',
+]);
 
-// 2) Your existing list of legacy tasks
 const taskOptions = [
   { value: 'Gait', label: 'Gait' },
   { value: 'Finger Tap Left', label: 'Finger Tap Left' },
@@ -25,21 +24,6 @@ const taskOptions = [
   { value: 'Leg agility Right', label: 'Leg agility Right' },
   { value: 'Hand Tremor Left Elbow Extended', label: 'Hand Tremor Left Elbow Extended' },
   { value: 'Hand Tremor Right Elbow Extended', label: 'Hand Tremor Right Elbow Extended' },
-
-  // { label: 'Dynamic tremor', value: 'Dynamic tremor' },
-  // { label: 'Mouth Opening', value: 'Mouth Opening' },
-  // { label: 'Passage', value: 'Passage' },
-  // { label: 'Free speech', value: 'Free speech' },
-  // { label: 'Hand Tremor', value: 'Hand Tremor' },
-  // { label: 'Hand pronation', value: 'Hand pronation' },
-  // { label: 'Phonation', value: 'Phonation' },
-  // { label: 'Postural tremor', value: 'Postural tremor' },
-  // { label: 'DDK', value: 'DDK' },
-  // { label: 'Eyebrow elevation', value: 'Eyebrow elevation' },
-  // { label: 'Picture Description', value: 'Picture Description' },
-  // { label: 'Rest tremor', value: 'Rest tremor' },
-  // { label: 'Lips spread', value: 'Lips spread' },
-  // { label: 'Arising from chair', value: 'Arising from chair' },
 ];
 
 

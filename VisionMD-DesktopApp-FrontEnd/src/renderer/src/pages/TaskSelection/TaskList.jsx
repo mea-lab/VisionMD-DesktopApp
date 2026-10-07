@@ -4,7 +4,10 @@ import isEqual from 'lodash/isEqual';
 import { taskOptions } from '../../constants/taskOptions'; 
 import Default from './Tasks/default'
 
-const taskSelectionLoaders = import.meta.glob('./Tasks/*.jsx');
+const taskSelectionLoaders = import.meta.glob([
+  './Tasks/*.jsx',
+  '!./Tasks/default.jsx',
+]);
 const selectedTaskFiles = Object.fromEntries(
   taskOptions.map(({ value }) => {
     const fileName = value.toLowerCase().replace(/\s+/g, '_');
@@ -12,7 +15,7 @@ const selectedTaskFiles = Object.fromEntries(
       path.endsWith(`/${fileName}.jsx`)
     );
     return [value, match ? lazy(match[1]) : null];
-  }).filter(([_, component]) => component)
+  }).filter(([, component]) => component)
 );
 
 const TaskList = ({
@@ -20,7 +23,6 @@ const TaskList = ({
   onTaskChange,
   onTaskDelete,
   videoRef,
-  resetTaskSelection,
   taskTypeData,
   setTaskTypeData,
 }) => {
@@ -85,7 +87,7 @@ const TaskList = ({
           (() => {
             const typeCounts = {};
             
-            return tasks.map((task, index) => {
+            return tasks.map((task) => {
               const taskType = task.name;
               const TaskComponent = selectedTaskFiles[taskType];
               const taskTypeIndex = typeCounts[taskType] ?? 0;

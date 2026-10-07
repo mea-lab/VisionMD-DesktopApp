@@ -1,7 +1,6 @@
 //src/pages/TaskSelection/TaskSelectionTab.jsx
-import React, { useState } from 'react';
+import { useState } from 'react';
 import TaskList from './TaskList';
-import Button from '@mui/material/Button';
 import JSONUploadDialog from './JSONUploadDialog';
 
 const TaskSelectionTab = ({
@@ -13,7 +12,6 @@ const TaskSelectionTab = ({
   onTaskDelete,
   isVideoReady,
   videoRef,
-  tasksReady,
   setTasksReady,
   resetTaskSelection,
   taskTypeData,
@@ -39,11 +37,11 @@ const TaskSelectionTab = ({
   
   const jsonFileHandle = (jsonFileUploaded, jsonContent) => {
     if (jsonFileUploaded && jsonContent !== null) {
-      if (jsonContent.hasOwnProperty('boundingBoxes')) {
+      if ('boundingBoxes' in jsonContent) {
         //new json
         setBoundingBoxes(jsonContent['boundingBoxes']);
         setFPS(jsonContent['fps']);
-        if (jsonContent.hasOwnProperty('tasks')) {
+        if ('tasks' in jsonContent) {
           const curtasks = jsonContent['tasks'];
           setTasks(curtasks);
           setTasks(getTasksFromtasks(curtasks));

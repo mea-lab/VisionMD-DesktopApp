@@ -7,6 +7,7 @@ from django.urls import path
 from django.conf import settings
 from app.analysis.analysis_quality import assess_analysis_quality
 from app.analysis.analysis_cache import cache_key, load_cached, save_cached
+from app.analysis.landmark_schema import attach_landmark_schema
 
 def execute_task(file_name: str, request):
     """Execute one analysis request; shared by sync and background APIs."""
@@ -16,6 +17,7 @@ def execute_task(file_name: str, request):
     if key and request.GET.get("force") not in {"1", "true", "yes"}:
         cached = load_cached(video_id, key)
         if cached is not None:
+            attach_landmark_schema(cached, file_name)
             # Quality checks are lightweight and may evolve independently of
             # cached model inference. Never return a stale quality decision.
             cached["analysisQuality"] = assess_analysis_quality(cached)
@@ -35,6 +37,7 @@ def execute_task(file_name: str, request):
     response_data = task_instance.api_response(request)
     if isinstance(response_data, HttpResponse):
         return response_data
+    attach_landmark_schema(response_data, file_name)
     response_data["analysisQuality"] = assess_analysis_quality(response_data)
     response_data["analysisRuntime"] = {
         "total_seconds": round(time.perf_counter() - started, 3),

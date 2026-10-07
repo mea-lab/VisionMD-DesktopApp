@@ -1,10 +1,9 @@
 //src/pages/TaskDetails/index.jsx
-import React, {
+import {
   useContext,
   useEffect,
   useRef,
   useState,
-  Suspense,
 } from 'react';
 
 import { useNavigate } from 'react-router-dom';
@@ -21,6 +20,10 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import AnalysisQualityBadge from '../../components/AnalysisQualityBadge';
 import { runAnalysisJob } from '../../utils/analysisJobs';
+
+const withoutKeys = (value, keys) => Object.fromEntries(
+  Object.entries(value).filter(([key]) => !keys.includes(key))
+);
 
 const TaskDetails = () => {
   const {
@@ -110,8 +113,7 @@ const TaskDetails = () => {
     const currentTaskId = currentTask?.id;
 
     setTaskErrors(prev => {
-      const { [currentTaskId]: _omit, ...rest } = prev;
-      return rest;
+      return withoutKeys(prev, [String(currentTaskId)]);
     });
   };
 
@@ -127,8 +129,7 @@ const TaskDetails = () => {
   
   const clearTaskError = (taskId) => {
     setTaskErrors(prev => {
-      const { [taskId]: _omit, ...rest } = prev;
-      return rest;
+      return withoutKeys(prev, [String(taskId)]);
     });
   };
 
@@ -150,7 +151,8 @@ const TaskDetails = () => {
         data: data.filter(item => item.Subject === true),
       }));
 
-      const { start, end, name, data, ...otherTaskFields } = taskData;
+      const { start, end, name } = taskData;
+      const otherTaskFields = withoutKeys(taskData, ['start', 'end', 'name', 'data']);
       let jsonData = {
         boundingBox: taskBoxCords,
         task_name: name,
@@ -186,12 +188,10 @@ const TaskDetails = () => {
       );
 
       setTaskErrors(prev => {
-        const { [taskId]: _remove, ...rest } = prev;
-        return rest;
+        return withoutKeys(prev, [String(taskId)]);
       });
       setAnalysisJobs(previous => {
-        const { [taskId]: _done, ...rest } = previous;
-        return rest;
+        return withoutKeys(previous, [String(taskId)]);
       });
 
       return true;
@@ -202,8 +202,7 @@ const TaskDetails = () => {
         [taskId]: err?.message || "Unknown error",
       }));
       setAnalysisJobs(previous => {
-        const { [taskId]: _done, ...rest } = previous;
-        return rest;
+        return withoutKeys(previous, [String(taskId)]);
       });
       return false;
     }
@@ -279,7 +278,6 @@ const TaskDetails = () => {
             setVideoReady={setVideoReady}
             setVideoData={setVideoData}
             fileName={fileName}
-            landMarks={tasks[selectedTask]?.data?.landMarks}
             selectedTask={selectedTask}
             tasks={tasks}
             setTasks={setTasks}

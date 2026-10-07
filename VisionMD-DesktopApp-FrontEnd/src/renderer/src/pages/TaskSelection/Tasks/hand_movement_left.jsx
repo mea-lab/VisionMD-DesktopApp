@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { IconButton, Collapse} from '@mui/material';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
 import TouchApp from '@mui/icons-material/TouchApp';

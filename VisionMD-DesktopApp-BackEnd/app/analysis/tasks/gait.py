@@ -1,16 +1,11 @@
 import os
 import math
 import json
-import uuid
 import numpy as np
 import traceback
-from django.core.files.storage import FileSystemStorage
-import gc
 import cv2
 from tqdm import tqdm
 import torch
-import gc
-from PIL import Image
 from scipy.signal import savgol_filter
 from .base_task import BaseTask
 from django.conf import settings
@@ -23,17 +18,12 @@ from app.analysis.signal_analyzers.gait_steady_step import (
     segment_step_times, summarize_step_times, segment_ankle_length_speed,
 )
 from app.analysis.signal_analyzers.gait_step_width import (
-    POOLED_FEATURE as WIDTH_POOLED_FEATURE, WITHIN_FEATURE as WIDTH_WITHIN_FEATURE,
+    WITHIN_FEATURE as WIDTH_WITHIN_FEATURE,
     STEADY_WIDTH_FEATURES, steady_width_samples, summarize_width,
 )
 from app.analysis.signal_analyzers.gait_segment_variability import combine_segment_variability
 from app.analysis.signal_analyzers.gait_reporting import public_features, diagnostic_features
-from app.analysis.signal_analyzers.gait_spatial_calibration import (
-    height_spatial_calibration,
-    scale_length_speed_results,
-    scale_length_speed_samples,
-    scale_steady_spatial_samples,
-)
+from app.analysis.signal_analyzers.gait_spatial_calibration import height_spatial_calibration
 from app.analysis.torch_device import run_with_device_fallback
 
 
@@ -143,6 +133,11 @@ class GaitTask(BaseTask):
                 turning_metadata,
                 spatial_calibration=spatial_calibration,
             )
+            analysis["quality"]["landmark_identity"] = {
+                "method": "3D continuity correction shared with 2D display landmarks",
+                "original_pair_frame_corrections": landmarks["left_right_swap_count"],
+                "mirrored_pair_frame_corrections": landmarks_mirrored["left_right_swap_count"],
+            }
             results = analysis["results"]
             results_mirrored = analysis["results_mirrored"]
             gait_event_dic = analysis["gait_event_dic"]
@@ -349,10 +344,12 @@ class GaitTask(BaseTask):
                 result, events, samples, quality = analyzer.analyze(
                     phases[start:end], strides[start:end], poses[start:end], self.fps,
                     return_details=True,
+                    spatial_scale=spatial_scale,
                 )
                 mirrored_result, mirrored_segment_events, mirrored_segment_samples, mirrored_quality = analyzer.analyze(
                     phases_mirrored[start:end], strides_mirrored[start:end],
                     poses_mirrored[start:end], self.fps, return_details=True,
+                    spatial_scale=spatial_scale,
                 )
             except Exception as exc:
                 segment_quality.append({
@@ -368,18 +365,13 @@ class GaitTask(BaseTask):
             mirrored_steady_steps.append(segment_step_times(mirrored_segment_events, end - start, self.fps))
             original_steady_widths.append(steady_width_samples(events, poses[start:end], self.fps))
             mirrored_steady_widths.append(steady_width_samples(mirrored_segment_events, poses_mirrored[start:end], self.fps))
-            steady_spatial["original"].append(scale_steady_spatial_samples(
-                segment_ankle_length_speed(events, poses[start:end], self.fps), spatial_scale
+            steady_spatial["original"].append(segment_ankle_length_speed(
+                events, poses[start:end], self.fps, spatial_scale
             ))
-            steady_spatial["mirrored"].append(scale_steady_spatial_samples(
-                segment_ankle_length_speed(mirrored_segment_events, poses_mirrored[start:end], self.fps), spatial_scale
+            steady_spatial["mirrored"].append(segment_ankle_length_speed(
+                mirrored_segment_events, poses_mirrored[start:end], self.fps,
+                spatial_scale,
             ))
-            result = scale_length_speed_results(result, spatial_scale)
-            mirrored_result = scale_length_speed_results(mirrored_result, spatial_scale)
-            samples = scale_length_speed_samples(samples, spatial_scale)
-            mirrored_segment_samples = scale_length_speed_samples(
-                mirrored_segment_samples, spatial_scale
-            )
             original_samples.append(samples)
             mirrored_samples.append(mirrored_segment_samples)
             for key in original_events:
@@ -919,11 +911,13 @@ class GaitTask(BaseTask):
         missing_mask = np.array(missing_mask)
         interp2d = self.interpolate_missing_poses(all_poses2d, missing_mask)
         interp3d = self.interpolate_missing_poses(all_poses3d, missing_mask)
-        corr3d   = self.correct_left_right_swapping(interp3d)
+        corr3d, swap_mask = self.correct_left_right_swapping(interp3d)
+        corr2d = self.apply_left_right_swaps(interp2d, swap_mask)
         all_preds = {
-            "poses2d": interp2d,
+            "poses2d": corr2d,
             "poses3d": corr3d,
             "poses3d_orientation": interp3d,
+            "left_right_swap_count": int(swap_mask.sum()),
         }
 
         # --- Post‐processing for MIRRORED (same pipeline) ---
@@ -931,11 +925,13 @@ class GaitTask(BaseTask):
         mir_poses3d = np.stack(poses3d_lists_mirr, axis=0)
         mir_interp2d = self.interpolate_missing_poses(mir_poses2d, missing_mask)
         mir_interp3d = self.interpolate_missing_poses(mir_poses3d, missing_mask)
-        mir_corr3d   = self.correct_left_right_swapping(mir_interp3d)
+        mir_corr3d, mir_swap_mask = self.correct_left_right_swapping(mir_interp3d)
+        mir_corr2d = self.apply_left_right_swaps(mir_interp2d, mir_swap_mask)
         mirrored_all_preds = {
-            "poses2d": mir_interp2d,
+            "poses2d": mir_corr2d,
             "poses3d": mir_corr3d,
             "poses3d_orientation": mir_interp3d,
+            "left_right_swap_count": int(mir_swap_mask.sum()),
         }
 
         # --- warnings & return ---
@@ -1119,6 +1115,11 @@ class GaitTask(BaseTask):
     
 
 
+    _left_right_pairs = (
+        ('lwri', 'rwri'), ('lelb', 'relb'), ('lsho', 'rsho'),
+        ('lank', 'rank'), ('lkne', 'rkne'), ('lhip', 'rhip'),
+    )
+
     def correct_left_right_swapping(self, poses, window_size=3, margin=100):
         """
         For each frame f, directly compare that frame's left/right
@@ -1131,23 +1132,14 @@ class GaitTask(BaseTask):
             'rhip','rkne','rank','lhip','lkne','lank','pelv','spin','head'
         ])
         IDX = {name: i for i, name in enumerate(metrabs_joint_order)}
-        PAIRS = [
-            ('lwri','rwri'),
-            ('lelb','relb'),
-            ('lsho','rsho'),
-            ('lank','rank'),
-            ('lkne','rkne'),
-            ('lhip','rhip'),
-        ]
-
         F, J, _ = poses.shape
         fixed_poses = poses.copy()
-        swapped = False
+        swap_mask = np.zeros((F, len(self._left_right_pairs)), dtype=bool)
 
         for f in range(1, F):
             start = max(0, f - window_size)
             prev_idxs = range(start, f)
-            for left_name, right_name in PAIRS:
+            for pair_index, (left_name, right_name) in enumerate(self._left_right_pairs):
                 Li, Ri = IDX[left_name], IDX[right_name]
                 curL, curR = fixed_poses[f, Li], fixed_poses[f, Ri]
 
@@ -1161,10 +1153,22 @@ class GaitTask(BaseTask):
                         swap_votes += 1
 
                 if swap_votes > len(prev_idxs) / 2.0:
-                    swapped = True
+                    swap_mask[f, pair_index] = True
                     fixed_poses[f, [Li, Ri]] = fixed_poses[f, [Ri, Li]]
-        if swapped: print("Warning: Swap was performed on frames")
-        return fixed_poses
+        return fixed_poses, swap_mask
+
+    def apply_left_right_swaps(self, poses, swap_mask):
+        """Apply the 3D identity decisions to a matching display landmark track."""
+        corrected = np.asarray(poses).copy()
+        indices = {name: i for i, name in enumerate(self._metrabs_joint_order)}
+        for pair_index, (left_name, right_name) in enumerate(self._left_right_pairs):
+            frames = np.flatnonzero(swap_mask[:, pair_index])
+            if frames.size:
+                left, right = indices[left_name], indices[right_name]
+                left_values = corrected[frames, left].copy()
+                corrected[frames, left] = corrected[frames, right]
+                corrected[frames, right] = left_values
+        return corrected
     
 
 

@@ -1,6 +1,7 @@
 // src/components/VideoPlayer/VideoDrawer.jsx
-import React, { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback } from 'react';
 import { landmarkDisplayColor } from './landmarkColor';
+import { landmarksForRole } from './landmarkData';
 
 const VideoDrawer = ({
   videoRef,
@@ -37,42 +38,6 @@ const VideoDrawer = ({
       ctx.globalCompositeOperation = 'source-over';
     }
   }, []);
-
-  // Modified drawVideoFrame to clip to a rounded rectangle
-  const drawVideoFrame = useCallback(() => {
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    if (video && canvas) {
-      const ctx = canvas.getContext('2d');
-      ctx.globalCompositeOperation = 'source-over';
-      const radius = 20; 
-      
-      // Save current context state
-      ctx.save();
-      
-      // Create a rounded rectangle clipping path
-      ctx.beginPath();
-      ctx.moveTo(radius, 0);
-      ctx.lineTo(canvas.width - radius, 0);
-      ctx.arcTo(canvas.width, 0, canvas.width, radius, radius);
-      ctx.lineTo(canvas.width, canvas.height - radius);
-      ctx.arcTo(canvas.width, canvas.height, canvas.width - radius, canvas.height, radius);
-      ctx.lineTo(radius, canvas.height);
-      ctx.arcTo(0, canvas.height, 0, canvas.height - radius, radius);
-      ctx.lineTo(0, radius);
-      ctx.arcTo(0, 0, radius, 0, radius);
-      ctx.closePath();
-      
-      // Apply the clipping region
-      ctx.clip();
-      
-      // Draw the video frame within the clipped area
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      // Restore context to remove clipping
-      ctx.restore();
-    }
-  }, [videoRef]);
 
   const drawBoundingBoxes = useCallback((scaleRatio) => {
     const canvas = canvasRef.current;
@@ -122,7 +87,7 @@ const VideoDrawer = ({
     const ctx = canvas.getContext('2d');
 
     const currentTask = tasks[selectedTask];
-    const landMarks = currentTask?.data?.landMarks;
+    const landMarks = landmarksForRole(currentTask?.data, 'display');
     const landmarkFps = currentTask.data?.landmark_fps ?? fps;
     const startFrame = currentTask.data?.landmark_start_frame
       ?? Math.round(currentTask.start * landmarkFps);
@@ -166,7 +131,6 @@ const VideoDrawer = ({
 
       // Check if currentTime is within any taskBox's time window.
       const inTaskTime = tasks.some((task) => currentTime >= task.start && currentTime <= task.end);
-      const canvas = canvasRef.current;
       const scaleRatio =  Math.min(
         displayWidth  / videoWidth,
         displayHeight / videoHeight
@@ -183,7 +147,8 @@ const VideoDrawer = ({
         drawLandMarks(scaleRatio, currentTime);
       }
     },
-    [getFrameNumber, clearCanvas, drawBoundingBoxes, drawLandMarks, landmark_colors, tasks, screen, isPlaying, zoomLevel]
+    [videoRef, getFrameNumber, clearCanvas, drawBoundingBoxes, drawLandMarks, tasks,
+      screen, isPlaying, zoomLevel, displayWidth, displayHeight, videoWidth, videoHeight]
   );
 
   // Set canvas dimensions and start the continuous render loop.

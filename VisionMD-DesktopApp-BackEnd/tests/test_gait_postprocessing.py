@@ -6,7 +6,6 @@ from app.analysis.signal_analyzers.gait_signal_analyzer import GaitSignalAnalyze
 from app.analysis.signal_analyzers.gait_spatial_calibration import (
     HEIGHT_CALIBRATION_COEFFICIENT,
     height_spatial_calibration,
-    scale_length_speed_samples,
 )
 from app.analysis.tasks.base_task import BaseTask
 from app.analysis.tasks.gait import GaitTask
@@ -113,28 +112,12 @@ def test_height_spatial_calibration_uses_median_head_to_ankle_stature():
     assert calibration["applied_to"] == ["step_length", "step_speed"]
 
 
-def test_height_spatial_scale_changes_only_length_and_speed_samples():
-    samples = {
-        "synthgait_step_length": np.asarray([0.5, 0.7]),
-        "synthgait_step_length_left": np.asarray([0.5]),
-        "step_speed_right": np.asarray([1.2]),
-        "step_width": np.asarray([0.15]),
-        "step_time_left": np.asarray([0.6]),
-    }
-
-    scaled = scale_length_speed_samples(samples, 0.8)
-
-    assert np.allclose(scaled["synthgait_step_length"], [0.4, 0.56])
-    assert np.allclose(scaled["synthgait_step_length_left"], [0.4])
-    assert np.allclose(scaled["step_speed_right"], [0.96])
-    assert np.array_equal(scaled["step_width"], samples["step_width"])
-    assert np.array_equal(scaled["step_time_left"], samples["step_time_left"])
-
-
 def test_straight_segment_analysis_applies_one_scale_to_both_pose_passes():
     class StubAnalyzer:
         @staticmethod
-        def analyze(phases, strides, poses, fps, return_details=False):
+        def analyze(
+            phases, strides, poses, fps, return_details=False, spatial_scale=1.0
+        ):
             events = {
                 "left_down": np.asarray([10.0, 40.0]),
                 "left_up": np.asarray([20.0, 50.0]),
@@ -153,6 +136,9 @@ def test_straight_segment_analysis_applies_one_scale_to_both_pose_passes():
                 "arm_correlation": np.asarray([0.0]),
                 "arm_correlation_weight": np.asarray([len(poses)]),
             }
+            for key in tuple(samples):
+                if key.startswith("synthgait_step_length") or key.startswith("step_speed"):
+                    samples[key] = samples[key] * spatial_scale
             result = GaitSignalAnalyzer.pool_feature_samples([samples])
             return result, events, samples, {"used_cleaned_events": True}
 
@@ -187,7 +173,9 @@ def test_straight_segment_analysis_applies_one_scale_to_both_pose_passes():
 def test_turn_interval_is_excluded_and_event_frames_are_restored():
     class StubAnalyzer:
         @staticmethod
-        def analyze(phases, strides, poses, fps, return_details=False):
+        def analyze(
+            phases, strides, poses, fps, return_details=False, spatial_scale=1.0
+        ):
             count = len(poses)
             events = {
                 "left_down": np.asarray([5.0, 25.0]),
@@ -309,6 +297,32 @@ def test_synthgait_spatial_features_match_forward_lateral_definitions():
     assert features["torso_ml_rms"] < 1e-9
 
 
+def test_spatial_scale_changes_length_and_speed_without_changing_width_or_timing():
+    analyzer = GaitSignalAnalyzer()
+    index = {name: i for i, name in enumerate(analyzer._metrabs_joint_order)}
+    order = np.asarray([index[name] for name in analyzer._gait_phase_joint_order])
+    poses = np.zeros((100, 17, 3), dtype=float)
+    poses[:, :, 2] = (np.arange(100) * 10.0)[:, None]
+    poses[:, index["rank"], 0] = -100.0
+    poses[:, index["lank"], 0] = 100.0
+    events = {
+        "left_down": np.asarray([10.0, 30.0, 50.0, 70.0]),
+        "left_up": np.asarray([25.0, 45.0, 65.0, 85.0]),
+        "right_down": np.asarray([20.0, 40.0, 60.0, 80.0]),
+        "right_up": np.asarray([15.0, 35.0, 55.0, 75.0]),
+    }
+
+    raw = analyzer.analyze_gait_video_features(events, poses, order, fps=30.0)
+    scaled = analyzer.analyze_gait_video_features(
+        events, poses, order, fps=30.0, spatial_scale=0.8
+    )
+
+    assert np.isclose(scaled["Average step length"], raw["Average step length"] * 0.8)
+    assert np.isclose(scaled["Average velocity"], raw["Average velocity"] * 0.8)
+    assert np.isclose(scaled["Step width"], raw["Step width"])
+    assert np.isclose(scaled["Average step time"], raw["Average step time"])
+
+
 def test_boundary_step_filter_discards_outer_steps_when_possible():
     analyzer = GaitSignalAnalyzer()
     events = {
@@ -330,7 +344,9 @@ def test_boundary_step_filter_discards_outer_steps_when_possible():
 def test_gait_segment_endpoint_reuses_cached_model_outputs(monkeypatch):
     class StubAnalyzer:
         @staticmethod
-        def analyze(phases, strides, poses, fps, return_details=False):
+        def analyze(
+            phases, strides, poses, fps, return_details=False, spatial_scale=1.0
+        ):
             events = {
                 "left_down": np.asarray([5.0, 25.0]),
                 "left_up": np.asarray([12.0, 32.0]),
@@ -414,3 +430,26 @@ def test_turn_p95_speed_resists_one_frame_orientation_spike():
     peak = float(np.degrees(np.max(np.abs(np.gradient(yaw,1/30.)))))
     assert result['p95_angular_speed_degrees_per_second'] < peak / 2
     assert 'peak_angular_speed_degrees_per_second' not in result
+
+
+def test_gait_identity_correction_is_shared_with_display_landmarks():
+    task = GaitTask()
+    index = {name: i for i, name in enumerate(task._metrabs_joint_order)}
+    poses3d = np.zeros((3, 17, 3), dtype=float)
+    poses2d = np.zeros((3, 17, 2), dtype=float)
+    left, right = index["lwri"], index["rwri"]
+    poses3d[:, left, 0] = 500.0
+    poses3d[:, right, 0] = -500.0
+    poses2d[:, left, 0] = 150.0
+    poses2d[:, right, 0] = 50.0
+    poses3d[-1, [left, right]] = poses3d[-1, [right, left]]
+    poses2d[-1, [left, right]] = poses2d[-1, [right, left]]
+
+    corrected3d, swap_mask = task.correct_left_right_swapping(
+        poses3d, window_size=2, margin=100
+    )
+    corrected2d = task.apply_left_right_swaps(poses2d, swap_mask)
+
+    assert swap_mask[-1, 0]
+    assert corrected3d[-1, left, 0] == 500.0
+    assert corrected2d[-1, left, 0] == 150.0

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useSyncExternalStore } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import IconButton from '@mui/material/IconButton';
 import Collapse from '@mui/material/Collapse';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
@@ -24,7 +24,6 @@ const HandTremorLeftElbowExtended = ({
   const defaultIntrinsic = task.intrinsic_matrix || Array.from({ length: 3 }, () => Array(3).fill(null));
   const defaultExtrinsic = task.extrinsic_matrix || Array.from({ length: 4 }, () => Array(4).fill(null));
 
-  const h = taskGlobals.height ?? null;
   const fov = taskGlobals.field_of_view ?? null;
   const sensorW = taskGlobals.sensor_width ?? null;
   const sensorH = taskGlobals.sensor_height ?? null;

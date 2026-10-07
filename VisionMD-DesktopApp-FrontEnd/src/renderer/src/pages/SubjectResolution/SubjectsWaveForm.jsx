@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import WaveSurfer from 'wavesurfer.js';
 import HoverPlugin from 'wavesurfer.js/plugins/hover';
 import Slider from '@mui/material/Slider';

@@ -50,36 +50,3 @@ def height_spatial_calibration(poses_mm, height_cm):
         "source_pose_pass": "original",
         "applied_to": ["step_length", "step_speed"],
     }
-
-
-def scale_length_speed_samples(samples, scale_factor):
-    """Scale step-length and step-speed arrays without changing other metrics."""
-    factor = float(scale_factor)
-    output = dict(samples)
-    for key, values in samples.items():
-        if key.startswith("synthgait_step_length") or key.startswith("step_speed"):
-            output[key] = np.asarray(values, dtype=float) * factor
-    return output
-
-
-def scale_length_speed_results(results, scale_factor):
-    """Scale already summarized length/speed values used in segment details."""
-    factor = float(scale_factor)
-    output = dict(results)
-    prefixes = ("Average step length", "Average velocity", "Step length", "Step speed")
-    for key, value in results.items():
-        if key.startswith(prefixes) and not isinstance(value, str):
-            output[key] = float(value) * factor
-    return output
-
-
-def scale_steady_spatial_samples(samples, scale_factor):
-    """Scale the length/speed diagnostic sample tree for one segment."""
-    factor = float(scale_factor)
-    return {
-        metric: {
-            side: (np.asarray(values, dtype=float) * factor).tolist()
-            for side, values in sides.items()
-        }
-        for metric, sides in samples.items()
-    }

@@ -1,17 +1,13 @@
-import {useState, useEffect} from 'react'
-import ScatterPlot from '../Tables/ScatterPlot';
 import FeatureTable from '../Tables/FeatureTable'
 import TremorGraphs from '../Graphs/TremorGraphs';
 
 const HandTremorRight = ({
   selectedTaskIndex,
   tasks,
-  setTasks,
   fileName,
   videoRef,
   startTime,
   endTime,
-  handleJSONUpload,
 }) => {
  return(
       <div>

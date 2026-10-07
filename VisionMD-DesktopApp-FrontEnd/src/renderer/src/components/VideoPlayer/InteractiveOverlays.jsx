@@ -1,6 +1,7 @@
-import React, { useRef, useEffect, useState } from 'react';
+import { useRef, useEffect, useState } from 'react';
 import { editTaskBox } from '../../pages/TaskSelection/taskBoundingBox';
 import { landmarkDisplayColor } from './landmarkColor';
+import { canEditLandmarks, landmarkKey, landmarksForRole } from './landmarkData';
 
 const ResizeHandles = ({ x, y, width, height, onResize, item, index, handleSize = 12.5, strokeThickness }) => {
   const handles = [
@@ -216,7 +217,8 @@ const InteractiveOverlays = ({
     e.stopPropagation();
     e.preventDefault();
     const svgPoint = getSVGPoint(e);
-    const currentLandmark = tasks[selectedTask].data.landMarks[landMarkIndex][landmarkIdx];
+    const displayLandmarks = landmarksForRole(tasks[selectedTask].data, 'display');
+    const currentLandmark = displayLandmarks[landMarkIndex][landmarkIdx];
     const circleCenterX = currentLandmark[0];
     const circleCenterY = currentLandmark[1];
     const offsetX = svgPoint.x - circleCenterX;
@@ -238,11 +240,12 @@ const InteractiveOverlays = ({
       const newTasks = [...prevTasks];
       const task = { ...newTasks[selectedTask] };
       const data = { ...task.data };
-      const newLandmarks = data.landMarks.slice();
+      const displayKey = landmarkKey(data, 'display');
+      const newLandmarks = data[displayKey].slice();
       const currentFrameLandmarks = newLandmarks[landMarkIndex].slice();
       currentFrameLandmarks[landmarkIdx] = [newX, newY];
       newLandmarks[landMarkIndex] = currentFrameLandmarks;
-      data.landMarks = newLandmarks;
+      data[displayKey] = newLandmarks;
       task.data = data;
       newTasks[selectedTask] = task;
       // Update our ref immediately.
@@ -257,7 +260,8 @@ const InteractiveOverlays = ({
     window.removeEventListener('pointerup', handleLandmarkDragEnd);
     draggingLandmarkRef.current = null;
 
-    const updatedLandmarks = tasksRef.current[selectedTask].data.landMarks;
+    const updatedData = tasksRef.current[selectedTask].data;
+    const updatedLandmarks = landmarksForRole(updatedData, 'display');
     
 
     try {
@@ -391,11 +395,13 @@ const InteractiveOverlays = ({
 
 
       {/* Render interactive landmarks when paused */}
-      {(!isPlaying && landMarkIndex != null && tasks?.[selectedTask]?.data?.landMarks?.[landMarkIndex]) && (
+      {(!isPlaying && landMarkIndex != null && landmarksForRole(tasks?.[selectedTask]?.data, 'display')?.[landMarkIndex]) && (
         <g className="landmarks-group">
           {(() => {
-            const colors3D = tasks[selectedTask].data.landmark_colors;
-            return tasks[selectedTask].data.landMarks[landMarkIndex].map((point, idx) => {
+            const selected = tasks[selectedTask];
+            const colors3D = selected.data.landmark_colors;
+            const editable = canEditLandmarks(selected);
+            return landmarksForRole(selected.data, 'display')[landMarkIndex].map((point, idx) => {
               const [px, py] = point;
               const fillColor = landmarkDisplayColor(colors3D, landMarkIndex, idx);
               return (
@@ -407,8 +413,8 @@ const InteractiveOverlays = ({
                   fill={fillColor}
                   stroke="white"
                   strokeWidth={strokeThickness/2}
-                  onPointerDown={(e) => handleLandmarkDragStart(e, idx)}
-                  style={{ cursor: 'move' }}
+                  onPointerDown={editable ? (e) => handleLandmarkDragStart(e, idx) : undefined}
+                  style={{ cursor: editable ? 'move' : 'default' }}
                 />
               );
             });

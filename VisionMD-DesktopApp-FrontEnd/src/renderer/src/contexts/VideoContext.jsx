@@ -1,5 +1,5 @@
 // src/contexts/VideoContext.jsx
-import React, { createContext, useState, useEffect, useRef } from 'react';
+import { createContext, useState, useEffect, useRef } from 'react';
 export const VideoContext = createContext();
 import { useAutoSave } from '@/hooks/useAutoSave';
 import { isEqual } from "lodash";

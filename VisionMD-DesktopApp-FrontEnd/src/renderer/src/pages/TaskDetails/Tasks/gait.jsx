@@ -1,5 +1,3 @@
-import {useState, useEffect} from 'react'
-import ScatterPlot from '../Tables/ScatterPlot';
 import FeatureTable from '../Tables/FeatureTable'
 import GaitGraphs from '../Graphs/GaitGraphs';
 import GaitSegmentsPanel from '../Graphs/GaitSegmentsPanel';
@@ -10,9 +8,6 @@ const Gait = ({
   setTasks,
   fileName,
   videoRef,
-  startTime,
-  endTime,
-  handleJSONUpload,
 }) => {
  return(
       <div>
@@ -27,10 +22,7 @@ const Gait = ({
               <GaitGraphs
                 selectedTaskIndex={selectedTaskIndex}
                 tasks={tasks}
-                fileName={fileName}
                 videoRef={videoRef}
-                startTime={startTime}
-                endTime={endTime}
               />
               <FeatureTable
                 selectedTaskIndex={selectedTaskIndex}

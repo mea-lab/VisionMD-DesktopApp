@@ -1,7 +1,9 @@
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
+from rest_framework import status
 from django.http import Http404
 from app.analysis.analysis_quality import assess_analysis_quality
+from app.analysis.landmark_schema import attach_landmark_schema
 import importlib
 import json
 import copy
@@ -170,6 +172,7 @@ def update_landmarks(request):
             "normalization_excluded_frames": sorted(normalization_excluded_frames),
         }
         output["analysisQuality"] = assess_analysis_quality(output)
+        attach_landmark_schema(output, file_name)
         if output["normalizationQuality"]["excluded_frame_count"]:
             quality = output["analysisQuality"]
             quality.setdefault("reasons", []).append(
@@ -177,7 +180,7 @@ def update_landmarks(request):
             )
             if quality.get("status") != "failed":
                 quality.update(status="review", label="Needs review")
-    except:
-        raise Http404(f"Something going wrong")
+    except ValueError as exc:
+        return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
     return Response(output)

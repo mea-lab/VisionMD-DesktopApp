@@ -40,7 +40,7 @@ def summarize_step_times(segments):
     return stats
 
 
-def segment_ankle_length_speed(events, poses_mm, fps):
+def segment_ankle_length_speed(events, poses_mm, fps, spatial_scale=1.0):
     """Diagnostic spatial samples inside the same two-second steady windows."""
     poses = np.asarray(poses_mm, float);fps = float(fps)
     lo, hi = BOUNDARY_SECONDS * fps, len(poses) - BOUNDARY_SECONDS * fps
@@ -59,7 +59,7 @@ def segment_ankle_length_speed(events, poses_mm, fps):
             continue
         a = poses[af, 13 if aside == "left" else 10, [0, 2]] / 1000
         b = poses[bf, 13 if bside == "left" else 10, [0, 2]] / 1000
-        length = abs(float((b - a) @ forward))
+        length = abs(float((b - a) @ forward)) * float(spatial_scale)
         out["length"][bside].append(length)
         out["speed"][bside].append(length / ((bf - af) / fps))
     return out

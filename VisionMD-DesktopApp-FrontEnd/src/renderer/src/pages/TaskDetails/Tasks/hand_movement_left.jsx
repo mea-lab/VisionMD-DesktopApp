@@ -1,4 +1,3 @@
-import { useEffect, useState } from 'react';
 import ScatterPlot from '../Tables/ScatterPlot';
 import WavePlotEditable from '../Graphs/WavePlotEditable';
 

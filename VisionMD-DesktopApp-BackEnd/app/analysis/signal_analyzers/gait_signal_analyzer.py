@@ -38,7 +38,10 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
     # ------------------------------------------------------------------
     # --- START: Abstract methods ---
     # ------------------------------------------------------------------
-    def analyze(self, phases, strides, poses_3D, fps, return_details=False) -> dict:
+    def analyze(
+        self, phases, strides, poses_3D, fps, return_details=False,
+        spatial_scale=1.0,
+    ) -> dict:
         if GaitSignalAnalyzer._gait_phase_order_idx is None:
             GaitSignalAnalyzer._gait_phase_order_idx = np.array(
                 [self._metrabs_joint_order.tolist().index(j) for j in GaitSignalAnalyzer._gait_phase_joint_order]
@@ -61,6 +64,7 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
                 GaitSignalAnalyzer._gait_phase_order_idx,
                 fps,
                 return_samples=True,
+                spatial_scale=spatial_scale,
             )
         except (ValueError, IndexError):
             # Event validation is deliberately conservative.  If it leaves too
@@ -77,6 +81,7 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
                 GaitSignalAnalyzer._gait_phase_order_idx,
                 fps,
                 return_samples=True,
+                spatial_scale=spatial_scale,
             )
 
         quality.update({
@@ -109,6 +114,7 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
         gait_phase_order_idx: list,
         fps,
         return_samples=False,
+        spatial_scale=1.0,
     ) -> dict:
         """
         Analyze spatiotemporal gait features from gait event timings and 3D keypoints.
@@ -178,6 +184,11 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
         lhs_idx = np.round(lhs).astype(int)
         rhs_idx = np.round(rhs).astype(int)
         synthgait = self._synthgait_spatial_features(kp, lhs_idx, rhs_idx, fps=fps)
+        spatial_scale = float(spatial_scale)
+        if not np.isfinite(spatial_scale) or spatial_scale <= 0:
+            raise ValueError("Gait spatial calibration scale must be positive and finite.")
+        synthgait["step_lengths"] *= spatial_scale
+        synthgait["step_speeds"] *= spatial_scale
         sl_left = synthgait["step_lengths"][synthgait["step_sides"] == 6]
         sl_right = synthgait["step_lengths"][synthgait["step_sides"] == 3]
         speed_left = synthgait["step_speeds"][synthgait["step_sides"] == 6]

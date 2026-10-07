@@ -1,13 +1,10 @@
 import { useState, useContext } from 'react';
 
-import Button from '@mui/material/Button';
 import Dialog from '@mui/material/Dialog';
 import DialogActions from '@mui/material/DialogActions';
 import DialogContent from '@mui/material/DialogContent';
-import DialogContentText from '@mui/material/DialogContentText';
 import DialogTitle from '@mui/material/DialogTitle';
 import CircularProgress from '@mui/material/CircularProgress';
-import Input from '@mui/material/Input';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
@@ -18,15 +15,12 @@ import { VideoContext } from '@/contexts/VideoContext';
 export default function JSONUploadDialog({ dialogOpen, setDialogOpen, handleJSONUpload }) {
   const { theme } = useTheme();
   const isLight = theme === 'light';
-  const [fileName, setFileName] = useState('');
+  const [, setFileName] = useState('');
   const [fileError, setFileError] = useState('');
   const [jsonContent, setJSONContent] = useState(null);
   const [serverProcessing, setServerProcessing] = useState(false);
 
-  const {
-    videoRef,
-    videoId,
-  } = useContext(VideoContext)
+  const { videoId } = useContext(VideoContext)
 
   const handleClose = () => {
     setDialogOpen(false);
@@ -133,7 +127,7 @@ export default function JSONUploadDialog({ dialogOpen, setDialogOpen, handleJSON
         setFileName(file.name);
         setFileError('');
       }
-    } catch (error) {
+    } catch {
       setFileError('Error reading the file.');
     }
   };

@@ -11,6 +11,10 @@ import CloseIcon from '@mui/icons-material/Close';
 import { VideoContext } from '../../contexts/VideoContext';
 import { cancelAnalysisJob, runAnalysisJob } from '../../utils/analysisJobs';
 import { useTheme } from '../../contexts/ThemeContext';
+
+const withoutKeys = (value, keys) => Object.fromEntries(
+  Object.entries(value).filter(([key]) => !keys.includes(key))
+);
 export default function JSONUploadDialog({
   dialogOpen,
   setDialogOpen,
@@ -19,7 +23,6 @@ export default function JSONUploadDialog({
 }) {
   const {
     videoId,
-    videoRef,
     fps,
     tasks,
     boundingBoxes,
@@ -59,7 +62,7 @@ export default function JSONUploadDialog({
           const content = await file.text();
           setJSONContent(JSON.parse(content));
           setFileError('');
-        } catch (error) {
+        } catch {
           setFileError('Error reading the file.');
         }
       } else {
@@ -86,7 +89,7 @@ export default function JSONUploadDialog({
           data: data.filter(item => item.Subject === true)
         }))
         
-      const { start, end, name, data, ...otherTaskFields } = taskData;
+      const otherTaskFields = withoutKeys(taskData, ['start', 'end', 'name', 'data']);
       let jsonData = {
         boundingBox: taskBoxCords,
         task_name: taskData.name,

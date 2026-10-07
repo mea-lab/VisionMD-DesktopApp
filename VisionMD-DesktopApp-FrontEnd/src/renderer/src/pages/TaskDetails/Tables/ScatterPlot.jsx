@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Plot from 'react-plotly.js';
 import  CloudDownload from '@mui/icons-material/CloudDownload';
 import Button from '@mui/material/Button';

@@ -1,13 +1,18 @@
-import React, { useMemo, useRef, useEffect, useState } from "react";
+import { useMemo, useRef, useEffect, useState } from "react";
 import UplotReact from "uplot-react";
 import "uplot/dist/uPlot.min.css";
 
+const formatSignalName = (name) => name
+  .split("_")
+  .map(word => word[0].toUpperCase() + word.slice(1))
+  .join(" ");
+
 const GaitGraphs = ({ selectedTaskIndex, tasks, videoRef }) => {
   const task    = tasks?.[selectedTaskIndex] ?? {};
-  const signals = task.data?.signals ?? {};
+  const signals = useMemo(() => task.data?.signals ?? {}, [task.data?.signals]);
   const start   = task.start ?? 0;
   const end     = task.end   ?? 0;
-  const names   = Object.keys(signals);
+  const names = useMemo(() => Object.keys(signals), [signals]);
 
   const [selectedName, setSelectedName] = useState(() => names[0] ?? "");
 
@@ -35,20 +40,26 @@ const GaitGraphs = ({ selectedTaskIndex, tasks, videoRef }) => {
     const vid = videoRef?.current;
     if (!vid || !selectedName) return;
 
+    let callbackId;
+    let active = true;
     const step = () => {
+      if (!active) return;
       const c = chartRef.current;
       if (c) c.setCursor({ left: c.valToPos(vid.currentTime, "x") });
-      vid.requestVideoFrameCallback(step);
+      callbackId = vid.requestVideoFrameCallback(step);
     };
-    vid.requestVideoFrameCallback(step);
+    callbackId = vid.requestVideoFrameCallback(step);
+    return () => {
+      active = false;
+      if (callbackId !== undefined && vid.cancelVideoFrameCallback) {
+        vid.cancelVideoFrameCallback(callbackId);
+      }
+    };
   }, [videoRef, selectedName]);
 
   if (!selectedName) return null;
 
-  const axisLabel = selectedName
-    .split("_")
-    .map(w => w[0].toUpperCase() + w.slice(1))
-    .join(" ");
+  const axisLabel = formatSignalName(selectedName);
 
   return (
     <div className="flex flex-col gap-8 items-center mx-4">
@@ -63,10 +74,7 @@ const GaitGraphs = ({ selectedTaskIndex, tasks, videoRef }) => {
           className="mb-4 bg-[#333338] text-gray-100 cursor-pointer"
         >
           {names.map(n => {
-            const lbl = n
-              .split("_")
-              .map(w => w[0].toUpperCase() + w.slice(1))
-              .join(" ");
+            const lbl = formatSignalName(n);
             return <option key={n} value={n}>{lbl} over Time</option>;
           })}
         </select>

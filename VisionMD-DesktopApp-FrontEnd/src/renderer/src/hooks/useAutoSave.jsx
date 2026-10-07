@@ -121,9 +121,15 @@ export function useAutoSave(
             const xhr = new XMLHttpRequest();
             xhr.open("POST", url, false);
             xhr.setRequestHeader("Content-Type", "application/json");
-            try { xhr.send(JSON.stringify(value)); } catch (_) {}
+            try {
+              xhr.send(JSON.stringify(value));
+            } catch {
+              // Page unload may terminate a synchronous fallback request.
+            }
           }
-        } catch (_) {}
+        } catch {
+          // Unload persistence is best effort; regular autosave remains active.
+        }
       });
     };
 

@@ -1,8 +1,9 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useReducer } from 'react';
 import Plot from 'react-plotly.js';
 import Button from '@mui/material/Button';
 import AnalysisRangePanel from '../AnalysisRangePanel';
 import { useTheme } from '../../../contexts/ThemeContext';
+import { landmarksForRole } from '../../../components/VideoPlayer/landmarkData';
 
 const WavePlotEditable = ({
   selectedTaskIndex,
@@ -19,7 +20,7 @@ const WavePlotEditable = ({
 
   useEffect(() => {
     setCurrentData(tasks[selectedTaskIndex].data);
-    setDataRevision((r) => r + 1);
+    forceDataRender();
   }, [tasks?.[selectedTaskIndex]?.data, selectedTaskIndex]);
 
   const [videoCurrentTime, setVideoCurrentTime] = useState(startTime);
@@ -38,8 +39,8 @@ const WavePlotEditable = ({
     peak: null,
   });
 
-  const [dataRevision, setDataRevision] = useState(0);
-  const [uiRevision, setUiRevision] = useState("stable");
+  const [, forceDataRender] = useReducer((revision) => revision + 1, 0);
+  const uiRevision = 'stable';
 
   // For quick-add (Q, W, E)
   const [quickAdd, setQuickAdd] = useState({
@@ -68,16 +69,18 @@ const WavePlotEditable = ({
 
   const applyCachedAnalysisRange = async (range, normStrategy) => {
     const task = tasks[selectedTaskIndex];
+    const analysisLandmarks = landmarksForRole(currentData, 'analysis');
+    const normalizationLandmarks = landmarksForRole(currentData, 'normalization');
     const cache = currentData.analysis_cache || {
       start_time: task.start,
       end_time: task.end,
       // Older VisionMD JSON files did not persist cache metadata.  Landmark
       // arrays contain one entry per source video frame, so derive the source
       // FPS for backward-compatible cached re-analysis.
-      fps: currentData.landMarks?.length / Math.max(task.end - task.start, Number.EPSILON),
+      fps: analysisLandmarks?.length / Math.max(task.end - task.start, Number.EPSILON),
       landmark_start_frame: currentData.landmark_start_frame,
-      landMarks: currentData.landMarks,
-      allLandMarks: currentData.allLandMarks,
+      landMarks: analysisLandmarks,
+      allLandMarks: normalizationLandmarks,
     };
     setReanalysing(true); setRangeError('');
     try {
@@ -255,7 +258,7 @@ const WavePlotEditable = ({
         const found = handleSelectElementFromArray(name, x);
         if (found) setSelectedPoint(found);
       }
-      setDataRevision((r) => r + 1);
+      forceDataRender();
     } else if (isMarkUp && selectedPoint.name === 'peak values') {
       // repositioning an existing peak
       const idx = selectedPoint.idx;
@@ -271,7 +274,7 @@ const WavePlotEditable = ({
         setSelectedPoint({});
         resetBlur();
         setIsMarkUp(false);
-        setDataRevision((r) => r + 1);
+        forceDataRender();
       } else {
         showPopUp('Peak must lie within the valley start/end range.');
       }
@@ -290,7 +293,7 @@ const WavePlotEditable = ({
       setTempCycle({ valleyStart: { x, y }, peak: null });
       setAddPointName('peak');
       showPopUp('Next, select the new peak point.');
-      setDataRevision((r) => r + 1);
+      forceDataRender();
 
     } else if (addPointName === 'peak') {
       // 2) Validate peak
@@ -310,7 +313,7 @@ const WavePlotEditable = ({
       setTempCycle((prev) => ({ ...prev, peak: { x, y } }));
       setAddPointName('valley_end');
       showPopUp('Finally, select the new valley end point.');
-      setDataRevision((r) => r + 1);
+      forceDataRender();
 
     } else if (addPointName === 'valley_end') {
       // 3) Validate valley end
@@ -354,7 +357,7 @@ const WavePlotEditable = ({
 
       // Reset so we can add another cycle if we want
       cancelCurrentTask();
-      setDataRevision((r) => r + 1);
+      forceDataRender();
     }
   };
 
@@ -387,7 +390,7 @@ const WavePlotEditable = ({
     updateRadarTable(updatedData);
 
     cancelCurrentTask();
-    setDataRevision((r) => r + 1);
+    forceDataRender();
   };
 
   const continueAlert = () => {
@@ -412,7 +415,7 @@ const WavePlotEditable = ({
       setQuickAdd((q) => ({ ...q, peakLowEnd: false }));
     }
     updateCurrentTaskData(dataCopy);
-    setDataRevision((r) => r + 1);
+    forceDataRender();
     updateRadarTable(dataCopy);
   };
 

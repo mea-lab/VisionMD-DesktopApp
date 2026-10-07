@@ -1,5 +1,5 @@
 // src/components/commons/VideoPlayer/VideoPlayer.jsx
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import VideoControls from './VideoControls';
 import Slider from '@mui/material/Slider';
 import VideoDrawer from './VideoDrawer';

@@ -2,7 +2,7 @@
 import { initializeTaskBox, patchTask } from './taskBoundingBox';
 import VideoPlayer from '../../components/VideoPlayer/VideoPlayer';
 import HeaderSection from './HeaderSection';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
 import TaskSelectionTab from './TaskSelectionTab';
 import TasksWaveForm from './TasksWaveForm';
 import { useContext } from 'react';

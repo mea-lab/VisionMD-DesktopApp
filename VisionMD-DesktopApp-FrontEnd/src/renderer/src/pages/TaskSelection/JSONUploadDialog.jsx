@@ -12,7 +12,6 @@ export default function JSONUploadDialog({
   dialogOpen,
   setDialogOpen,
   handleJSONUpload,
-  videoRef,
 }) {
   const { theme } = useTheme();
   const isLight = theme === 'light';
@@ -37,33 +36,33 @@ export default function JSONUploadDialog({
   };
 
   const validateNewJson = data => {
-    if (!data.hasOwnProperty('fps')) {
+    if (!('fps' in data)) {
       throw new Error('fps field is missing.');
     } else if (typeof data.fps !== 'number') {
       throw new Error('fps should be a number.');
     }
 
-    if (!data.hasOwnProperty('boundingBoxes')) {
+    if (!('boundingBoxes' in data)) {
       throw new Error('boundingBoxes field is missing.');
     } else if (!Array.isArray(data.boundingBoxes)) {
       throw new Error('boundingBoxes should be an array.');
     }
 
     data.boundingBoxes.forEach(box => {
-      if (!box.hasOwnProperty('frameNumber')) {
+      if (!('frameNumber' in box)) {
         throw new Error('frameNumber field in boundingBoxes is missing.');
       } else if (typeof box.frameNumber !== 'number') {
         throw new Error('frameNumber in boundingBoxes should be a number.');
       }
 
-      if (!box.hasOwnProperty('data')) {
+      if (!('data' in box)) {
         throw new Error('data field in boundingBoxes is missing.');
       } else if (!Array.isArray(box.data)) {
         throw new Error('data in boundingBoxes should be an array.');
       }
 
       box.data.forEach(item => {
-        if (!item.hasOwnProperty('id')) {
+        if (!('id' in item)) {
           throw new Error('id field in boundingBoxes data is missing.');
         }
         // } else if (typeof item.id !== 'number') {
@@ -71,7 +70,7 @@ export default function JSONUploadDialog({
         // }
 
         ['x', 'y', 'width', 'height'].forEach(prop => {
-          if (!item.hasOwnProperty(prop)) {
+          if (!(prop in item)) {
             throw new Error(`${prop} field in boundingBoxes data is missing.`);
           } else if (typeof item[prop] !== 'number') {
             throw new Error(
@@ -162,7 +161,7 @@ export default function JSONUploadDialog({
             // setFileName(file.name);
             setFileError('');
           }
-        } catch (error) {
+        } catch {
           setFileError('Error reading the file.');
         }
       } else {

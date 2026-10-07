@@ -1,5 +1,5 @@
 // src/components/Gait.jsx
-import React, { useState, useRef, useEffect, useSyncExternalStore } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import IconButton from '@mui/material/IconButton';
 import Collapse from '@mui/material/Collapse';
 import HighlightOffIcon from '@mui/icons-material/HighlightOff';
