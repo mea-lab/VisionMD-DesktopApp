@@ -23,6 +23,7 @@ import pandas as pd
 import torch
 from scipy.signal import butter, sosfiltfilt
 from skimage.filters import gaussian
+from app.analysis.torch_device import run_with_device_fallback
 
 
 def file_sha256(path: str | Path) -> str:
@@ -151,6 +152,35 @@ class WiLorBatch:
         self.pipeline = WiLorHandPose3dEstimationPipeline(**kwargs)
         self.size = self.pipeline.IMAGE_SIZE
 
+    def _move_to_cpu(self) -> None:
+        self.pipeline.wilor_model.to("cpu")
+        hand_detector = getattr(self.pipeline, "hand_detector", None)
+        if hand_detector is not None:
+            try:
+                hand_detector.to("cpu")
+            except Exception:
+                # Direct batched WiLoR inference does not use this detector.
+                pass
+        self.pipeline.device = torch.device("cpu")
+        self.device = torch.device("cpu")
+
+    def _forward(self, patches: list[np.ndarray]):
+        stacked = np.stack(patches)
+        def infer(active_device):
+            batch = torch.from_numpy(stacked).to(
+                device=active_device, dtype=self.pipeline.dtype
+            )
+            with torch.no_grad():
+                return self.pipeline.wilor_model(batch)
+        output,actual_device = run_with_device_fallback(
+            infer,
+            self.device,
+            label="WiLoR hand-pose inference",
+            on_cpu_fallback=self._move_to_cpu,
+        )
+        self.device = torch.device(actual_device)
+        return output
+
     def infer(self, frames: list[np.ndarray], roi: np.ndarray, right: bool) -> np.ndarray:
         return self.infer_rois(frames, [roi] * len(frames), right)
 
@@ -171,9 +201,7 @@ class WiLorBatch:
                                                        do_flip=not right, scale=1.0, rot=0,
                                                        border_mode=cv2.BORDER_CONSTANT)
             patches.append(patch)
-        batch = torch.from_numpy(np.stack(patches)).to(self.device, dtype=self.pipeline.dtype)
-        with torch.no_grad():
-            keypoints = self.pipeline.wilor_model(batch)["pred_keypoints_3d"].cpu().float().numpy()
+        keypoints = self._forward(patches)["pred_keypoints_3d"].cpu().float().numpy()
         if not right:
             keypoints[:, :, 0] *= -1
         return keypoints
@@ -201,9 +229,7 @@ class WiLorBatch:
                 do_flip=not right, scale=1.0, rot=0, border_mode=cv2.BORDER_CONSTANT)
             patches.append(patch); centers.append(center); sides.append(side)
             image_sizes.append(np.array([image.shape[1], image.shape[0]], float))
-        batch = torch.from_numpy(np.stack(patches)).to(self.device, dtype=self.pipeline.dtype)
-        with torch.no_grad():
-            output = self.pipeline.wilor_model(batch)
+        output = self._forward(patches)
         keypoints = output["pred_keypoints_3d"].cpu().float().numpy()
         cameras = output["pred_cam"].cpu().float().numpy()
         projections = []

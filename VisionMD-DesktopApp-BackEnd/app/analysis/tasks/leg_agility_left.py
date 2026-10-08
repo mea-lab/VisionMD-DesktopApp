@@ -100,6 +100,7 @@ class LegAgilityLeftTask(BaseTask):
             output["landMarks"] = essential_landmarks
             output["allLandMarks"] = all_landmarks
             output["normalization_factor"] = normalization_factor
+            output["landmarkGapQuality"] = self.landmark_gap_quality
 
         except Exception as e:
             raise Exception(str(e))
@@ -256,9 +257,7 @@ class LegAgilityLeftTask(BaseTask):
         video.release()
         detector.close()
 
-        missing_percent = sum(1 for x in essential_landmarks if not x) / len(essential_landmarks)
-        if missing_percent > 0.1:
-            raise Exception((f"Left leg could not be found in more than 10% of the frames. The video quality may be too low or the video may not be a leg agility task."))
+        self.check_landmark_gaps(essential_landmarks, "leg agility left")
 
         return essential_landmarks, all_landmarks
 

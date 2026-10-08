@@ -96,6 +96,9 @@ def _cycle_morphology(result: dict[str, Any]) -> dict[str, float | int]:
 def _assess_analysis_quality(result: dict[str, Any]) -> dict[str, Any]:
     reasons: list[str] = []
     metrics: dict[str, Any] = {}
+    feature_quality = result.get("featureEstimationQuality")
+    if isinstance(feature_quality, dict) and feature_quality.get("status") == "needs_correction":
+        reasons.append(feature_quality.get("message") or "Movement measures require landmark correction")
     signal = _result_signal(result)
 
     if signal.size < 3:
@@ -145,6 +148,15 @@ def _assess_analysis_quality(result: dict[str, Any]) -> dict[str, Any]:
             reasons.append("Cycle durations vary unusually")
         if morphology["peak_interval_robust_cv"] > 0.30:
             reasons.append("Peak cadence is unusually irregular")
+
+    gap_quality = result.get("landmarkGapQuality")
+    if isinstance(gap_quality, dict):
+        metrics["missing_frame_fraction"] = float(gap_quality.get("missing_fraction", 0))
+        metrics["longest_missing_run_seconds"] = float(gap_quality.get("longest_missing_run_seconds", 0))
+        if gap_quality.get("long_gap"):
+            reasons.append("Sustained tracking loss was filled provisionally; correct the landmark overlays before using the measures")
+        elif gap_quality.get("needs_review"):
+            reasons.append("More than 10% of tracking frames were missing and repaired; review the overlays")
 
     landmark_quality = result.get("landmarkQuality")
     if isinstance(landmark_quality, dict):

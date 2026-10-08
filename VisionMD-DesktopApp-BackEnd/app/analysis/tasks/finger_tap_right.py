@@ -110,6 +110,7 @@ class FingerTapRightTask(BaseTask):
             output["landMarks"] = essential_landmarks
             output["allLandMarks"] = all_landmarks
             output["normalization_factor"] = normalization_factor
+            output["landmarkGapQuality"] = self.landmark_gap_quality
             output["handSelectionQuality"] = self.hand_selection_quality
             output["landmarkQuality"] = landmark_quality
 
@@ -258,16 +259,7 @@ class FingerTapRightTask(BaseTask):
             "label_override_count": hand_tracker.label_override_count,
             "rejected_frame_count": hand_tracker.rejected_frame_count,
         }
-        missing_percent = sum(1 for x in essential_landmarks if not x) / len(essential_landmarks)
-        if missing_percent > 0.1:
-            raise Exception(
-                f"Reliable right-hand tracking was unavailable in "
-                f"{sum(not frame for frame in essential_landmarks)} of "
-                f"{len(essential_landmarks)} frames ({missing_percent:.1%}), "
-                "exceeding the 10% limit. This can reflect missed detections, "
-                "uncertain hand labels, or lost hand association. "
-                "Check the task interval and hand bounding box."
-            )
+        self.check_landmark_gaps(essential_landmarks, "finger tap right")
         
         return essential_landmarks, all_landmarks
 

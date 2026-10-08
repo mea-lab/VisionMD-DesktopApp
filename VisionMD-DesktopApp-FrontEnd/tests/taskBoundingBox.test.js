@@ -45,3 +45,18 @@ test('explicit normalization overrides and same-type edits are retained', () => 
   assert.equal(patchTask(initial, { start: .2 }, detections, 30).norm_strategy, 'INDEXSIZE');
   assert.equal(patchTask(initial, { name: 'Hand Movement Left', norm_strategy: 'THUMBSIZE' }, detections, 30).norm_strategy, 'THUMBSIZE');
 });
+
+test('clicking an unchanged bounding box preserves the current analysis', () => {
+  const initial = { ...initializeTaskBox(task, detections, 30), data: { old: true } };
+  assert.equal(editTaskBox(initial, { x: initial.x, y: initial.y }), initial);
+});
+test('editing one task box clears only its analysis and preserves its interval', () => {
+  const initial = { ...initializeTaskBox(task, detections, 30), data: { analysis_cache: { old: true } } };
+  const other = { ...initial, id: 2 };
+  const tasks = [initial, other].map((t, i) => i === 0 ? editTaskBox(t, { x: 55 }) : t);
+  assert.equal(tasks[0].data, null);
+  assert.equal(tasks[0].start, initial.start);
+  assert.equal(tasks[0].end, initial.end);
+  assert.equal(tasks[0].box_manual, true);
+  assert.equal(tasks[1], other);
+});

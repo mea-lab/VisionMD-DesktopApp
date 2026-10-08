@@ -30,13 +30,16 @@ from ._wilor_ps_pipeline import (WiLorBatch, angle_anomaly_diagnostics,
     zero_phase_lowpass)
 from ._wilor_temporal_refiner import refine_failed_trajectory
 from ._mediapipe_ps_screen import screen_mediapipe_world_landmarks
+from app.analysis.model_registry import reset_yolo_runtime
 from app.analysis.signal_analyzers.peakfinder_signal_analyzer import PeakfinderSignalAnalyzer
+from app.analysis.torch_device import preferred_device, run_with_device_fallback
 
 _HAND_MODEL = None
+_HAND_DEVICE = None
 _WILOR_MODEL = None
 
 def _device():
-    return "cuda" if torch.cuda.is_available() else "cpu"
+    return preferred_device()
 
 def _hand_model_path():
     configured=os.environ.get("VISIONMD_HAND_DETECTOR_MODEL")
@@ -48,14 +51,20 @@ def _hand_model_path():
     raise FileNotFoundError("Set VISIONMD_HAND_DETECTOR_MODEL to best_hand_model.pt")
 
 def _models():
-    global _HAND_MODEL,_WILOR_MODEL
+    global _HAND_MODEL,_HAND_DEVICE,_WILOR_MODEL
     if _HAND_MODEL is None:
         _HAND_MODEL = YOLO(_hand_model_path())
+        _HAND_DEVICE = _device()
     if _WILOR_MODEL is None:
         model_dir = os.environ.get("VISIONMD_WILOR_MODEL_DIR")
         if not model_dir:
             model_dir = str(Path(settings.BASE_DIR) / "app/analysis/models/wilor_mini")
-        _WILOR_MODEL = WiLorBatch(_device(), model_dir)
+        _WILOR_MODEL,_actual_device = run_with_device_fallback(
+            lambda active_device: WiLorBatch(active_device, model_dir),
+            _device(),
+            label="WiLoR model initialization",
+        )
+        _HAND_DEVICE = preferred_device()
     return _HAND_MODEL, _WILOR_MODEL
 
 def _square(box,width,height,scale=1.5):
@@ -134,6 +143,9 @@ class HandPronationSupinationTask(BaseTask):
         return _models()[1]
 
     def _localize(self,model):
+        global _HAND_DEVICE
+        if _HAND_DEVICE is None:
+            _HAND_DEVICE = _device()
         b=self.original_bounding_box; px1,py1=int(b["x"]),int(b["y"]); px2,py2=px1+int(b["width"]),py1+int(b["height"])
         cap=cv2.VideoCapture(self.video_file_path); cap.set(cv2.CAP_PROP_POS_FRAMES,self.task_start_frame_idx)
         count=self.task_end_frame_idx-self.task_start_frame_idx; step=max(1,round(self.video_fps/12.)); samples={}; cls=1 if self.HAND_LABEL=="Right" else 0
@@ -151,7 +163,12 @@ class HandPronationSupinationTask(BaseTask):
                 if px2 <= px1 or py2 <= py1:
                     raise ValueError("The selected subject bounding box is outside the video frame.")
             crop=frame[py1:py2,px1:px2]
-            result=model.predict(crop,device=_device(),conf=.05,classes=[cls],verbose=False)[0]
+            def predict(active_device):
+                return model.predict(crop,device=active_device,conf=.05,
+                                     classes=[cls],verbose=False)[0]
+            result,_HAND_DEVICE=run_with_device_fallback(
+                predict,_HAND_DEVICE,label="YOLO hand localization",
+                on_cpu_fallback=lambda: reset_yolo_runtime(model))
             if result.boxes is not None and len(result.boxes):
                 boxes=result.boxes.xyxy.cpu().numpy().astype(float); boxes[:,[0,2]]+=px1; boxes[:,[1,3]]+=py1; samples[i]=list(boxes)
             if i%max(1,count//20)==0: self._progress(32+16*i/max(1,count),"YOLO hand localization")

@@ -53,7 +53,27 @@ class PeakfinderSignalAnalyzer(BaseSignalAnalyzer):
         if n_samples < 2:
             n_samples = len(signal_array)
         up_sample_signal = signal.resample(signal_array, n_samples)
-        features, distance, velocity, peaks = get_output(up_sample_signal)
+        feature_failure = None
+        try:
+            features, distance, velocity, peaks = get_output(up_sample_signal)
+        except ValueError as exc:
+            message = str(exc)
+            if not ("zero-size array to reduction operation" in message
+                    or "No complete movement cycles" in message
+                    or "Movement cycle has an empty opening or closing interval" in message):
+                raise
+            # Keep the waveform and task landmarks editable. No measurements
+            # should be invented when peak/cycle estimation fails.
+            features = None
+            distance = up_sample_signal
+            velocity = np.gradient(distance) * up_fps if len(distance) > 1 else np.zeros_like(distance)
+            peaks = []
+            feature_failure = {
+                "status": "needs_correction",
+                "message": "Movement measures could not be calculated because no valid complete cycles were available. "
+                           "The landmarks and waveform are available for correction. Adjust the landmarks, "
+                           "task interval, or bounding box, then recalculate.",
+            }
 
         # 4) Build time array
         size = len(distance)
@@ -120,6 +140,8 @@ class PeakfinderSignalAnalyzer(BaseSignalAnalyzer):
             "radarTable": features,
         }
 
+        if feature_failure is not None:
+            jsonFinal["featureEstimationQuality"] = feature_failure
         return jsonFinal
 
 
@@ -242,6 +264,9 @@ def get_output(up_sample_signal):
         up_sample_signal, fs=fs, minDistance=3, cutOffFrequency=7.5, prct=0.05
     )
 
+    if not peaks:
+        raise ValueError("No complete movement cycles were found.")
+
     amplitude = []
     peakTime = []
     rmsVelocity = []
@@ -260,6 +285,9 @@ def get_output(up_sample_signal):
     maxVelocity = np.max(velocity)
 
     for idx, peak in enumerate(peaks):
+        if not (peak['openingValleyIndex'] < peak['openingPeakIndex']
+                and peak['closingPeakIndex'] < peak['closingValleyIndex']):
+            raise ValueError("Movement cycle has an empty opening or closing interval.")
 
         #for some reason, the peakFinder function does not return the opening and closing Peak Index
         # so we need to fill the empty values with the peak index

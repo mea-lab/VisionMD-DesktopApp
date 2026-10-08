@@ -172,6 +172,30 @@ class BaseTask(ABC):
             ])
         return coords
 
+    def check_landmark_gaps(self, landmarks, target="Landmarks"):
+        """Return gap diagnostics while retaining a provisional, editable track."""
+        missing = np.array([frame is None or len(frame) == 0 for frame in landmarks])
+        if len(missing) == 0 or int((~missing).sum()) < 2:
+            raise ValueError(f"{target}: fewer than two tracked frames in the selected interval.")
+        fps = float(getattr(self, "video_fps", None) or getattr(self, "fps", None) or 30.0)
+        indices = np.flatnonzero(missing)
+        runs = [run for run in np.split(indices, np.where(np.diff(indices) > 1)[0] + 1) if len(run)]
+        longest = max((len(run) for run in runs), default=0)
+        fraction = float(missing.mean())
+        self.landmark_gap_quality = {
+            "version": "visionmd-gap-policy-v1",
+            "missing_frame_count": int(missing.sum()),
+            "frame_count": len(missing),
+            "missing_fraction": fraction,
+            "longest_missing_run_frames": longest,
+            "longest_missing_run_seconds": longest / fps,
+            "needs_review": fraction > 0.1,
+        }
+        self.landmark_gap_quality["long_gap"] = longest > max(1, int(round(0.5 * fps)))
+        self.landmark_gap_quality["needs_review"] |= self.landmark_gap_quality["long_gap"]
+        self.landmark_gap_quality["provisional"] = self.landmark_gap_quality["needs_review"]
+        return self.landmark_gap_quality
+
     @staticmethod
     def interpolate_missing_landmarks(landmarks):
         """Backward-compatible wrapper for :meth:`repair_landmark_track`.

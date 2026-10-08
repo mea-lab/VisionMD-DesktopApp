@@ -16,6 +16,8 @@ def temp_media_root(settings, tmp_path):
 
 def upload_video(client):
     video_path = Path(__file__).parent / "videos" / "finger_tap_right.mp4"
+    if not video_path.exists():
+        pytest.skip("Optional finger_tap_right.mp4 regression fixture is not installed")
 
     with video_path.open("rb") as video_file:
         response = client.post(

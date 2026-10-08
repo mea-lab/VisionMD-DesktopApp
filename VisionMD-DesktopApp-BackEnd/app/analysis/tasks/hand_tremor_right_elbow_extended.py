@@ -24,6 +24,7 @@ import numpy as np
 import os
 from app.analysis.models.metrabs_pytorch.loader import load_model as load_metrabs_model
 from app.analysis.model_registry import get_model, reset_yolo_runtime
+from app.analysis.torch_device import preferred_device, run_with_device_fallback
 
 class HandTremorRightElbowExtendedTask(BaseTask):
     """
@@ -99,6 +100,7 @@ class HandTremorRightElbowExtendedTask(BaseTask):
         self.focal_length = None
         self.intrinsic_matrix = None
         self.extrinsic_matrix = None
+        self._inference_device = preferred_device()
         
     def api_response(self, request):
         """
@@ -142,6 +144,7 @@ class HandTremorRightElbowExtendedTask(BaseTask):
             response = {}
             response['File name'] = self.file_name
             response['Task name'] = self.task_name
+            response['landmarkGapQuality'] = self.landmark_gap_quality
             response['Tremor Vertical Amplitude (mm)'] = tremorAmplitude_Vertical
             response['Tremor Vertical Principal Frequency (Hz)'] = tremorPrincipalFrequency_Vertical
             response['Tremor Horizontal Amplitude (mm)'] = tremorAmplitude_Horizontal
@@ -316,9 +319,12 @@ class HandTremorRightElbowExtendedTask(BaseTask):
             'metrabs_eff2l_384px_800k_28ds_pytorch'
         )
         self._modelMeTrabs = get_model(
-            ("metrabs", os.path.abspath(metrabs_model_path)),
-            lambda: load_metrabs_model(metrabs_model_path),
+            ("metrabs", os.path.abspath(metrabs_model_path), self._inference_device),
+            lambda: load_metrabs_model(
+                metrabs_model_path, device=self._inference_device
+            ),
         )
+        self._inference_device = str(self._modelMeTrabs.device)
 
 
         # load mediapipe hand landmark model
@@ -371,6 +377,29 @@ class HandTremorRightElbowExtendedTask(BaseTask):
         return tremorSignal_Vertical_mm, tremorSignal_Horizontal_mm
 
     def extract_landmarks(self) -> tuple:
+        selected = str(self._modelMeTrabs.device)
+
+        def move_to_cpu():
+            metrabs_model_path = os.path.join(
+                settings.BASE_DIR, 'app', 'analysis', 'models',
+                'metrabs_eff2l_384px_800k_28ds_pytorch'
+            )
+            self._modelMeTrabs = get_model(
+                ("metrabs", os.path.abspath(metrabs_model_path), "cpu"),
+                lambda: load_metrabs_model(metrabs_model_path, device="cpu"),
+            )
+            self._inference_device = "cpu"
+            reset_yolo_runtime(self._modelHandLandmarkNano)
+
+        result, _actual_device = run_with_device_fallback(
+            lambda _active_device: self._extract_landmarks_once(),
+            selected,
+            label="hand tremor landmark inference",
+            on_cpu_fallback=move_to_cpu,
+        )
+        return result
+
+    def _extract_landmarks_once(self) -> tuple:
         """
         Process video frames between start_frame and end_frame and extract hand landmarks 
         for the right hand from each frame.
@@ -407,7 +436,16 @@ class HandTremorRightElbowExtendedTask(BaseTask):
             croppedFrame = frame[y_min:y_max, x_min:x_max, :]
 
             # Run hand landmark detection
-            resultsLandmarksNano = self._modelHandLandmarkNano.track(frame, verbose=False, conf=0.5)
+            def track(active_device):
+                return self._modelHandLandmarkNano.track(
+                    frame, verbose=False, conf=0.5, device=active_device
+                )
+            resultsLandmarksNano,self._inference_device = run_with_device_fallback(
+                track,
+                self._inference_device,
+                label="YOLO hand landmark tracking",
+                on_cpu_fallback=lambda: reset_yolo_runtime(self._modelHandLandmarkNano),
+            )
 
             if not resultsLandmarksNano or len(resultsLandmarksNano[0].keypoints.xy) == 0:
                 keypoints_2d_right_NanoModel.append([])
@@ -435,9 +473,7 @@ class HandTremorRightElbowExtendedTask(BaseTask):
 
         if len(keypoints_2d_right_NanoModel) == 0:
             raise Exception("No frames were processed for the selected time range.")
-        missing_percent = sum(1 for x in keypoints_2d_right_NanoModel if len(x) == 0) / len(keypoints_2d_right_NanoModel)
-        if missing_percent > 0.1:
-            raise Exception((f"Right hand could not be found in more than 10% of the frames. The video quality may be too low or the video may not be a hand tremor task."))
+        self.check_landmark_gaps(keypoints_2d_right_NanoModel, "hand tremor right elbow extended")
 
         cap.release()
         return keypoints_2d_right_NanoModel

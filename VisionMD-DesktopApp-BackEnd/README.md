@@ -67,18 +67,29 @@ conda activate VisionMD
 ```
 
 ### 2. Download the models
-The MeTRAbs PyTorch inference implementation is part of the repository. Its
-large checkpoint package is intentionally downloaded locally, rather than
-stored in Git. Download it once using the script for your platform:
+Large model weights are intentionally downloaded locally rather than stored in
+Git. Download and verify all required WiLoR, hand-localization, and MeTRAbs
+assets with the script for your platform:
 
 ```bash
-./scripts/get_models.sh # For Linux / MacOS
-./scripts/get_models.bat # For Windows
+./scripts/get_models.sh       # Linux / macOS
+scripts\get_models.bat         # Windows
 ```
 
-The scripts create
-`app/analysis/models/metrabs_eff2l_384px_800k_28ds_pytorch/`. This directory
-is ignored by Git and must be present before a MeTRAbs-based analysis can run.
+The installer is idempotent: files that already match their expected SHA-256
+are skipped, while incomplete or corrupt files are downloaded again. It creates:
+
+```text
+app/analysis/models/wilor_mini/pretrained_models/
+app/analysis/models/hand_detector/best_hand_model.pt
+app/analysis/models/metrabs_eff2l_384px_800k_28ds_pytorch/
+```
+
+These paths are ignored by Git. Run the installer before starting VisionMD;
+the full download requires approximately 3 GB of free disk space in addition
+to temporary extraction space. WiLoR can still fetch its upstream assets on
+first use when they are absent, but the setup script is preferred because it
+installs every VisionMD-specific model and verifies exact file hashes.
 
 ### 3. Start the Django Development Server
 

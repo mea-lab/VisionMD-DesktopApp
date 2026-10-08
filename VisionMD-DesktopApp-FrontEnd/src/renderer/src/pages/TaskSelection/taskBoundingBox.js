@@ -43,5 +43,6 @@ export function patchTask(task, patch, boundingBoxes, fps) {
 }
 
 export function editTaskBox(task, patch) {
+  if (Object.entries(patch).every(([key, value]) => task[key] === value)) return task;
   return { ...task, ...patch, box_manual: true, data: null };
 }

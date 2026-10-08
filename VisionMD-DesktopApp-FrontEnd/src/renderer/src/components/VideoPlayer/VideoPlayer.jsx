@@ -18,6 +18,7 @@ const VideoPlayer = ({
   selectedTask,
   tasks,
   setTasks,
+  editTaskBoundingBox = false,
 }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -310,6 +311,7 @@ const VideoPlayer = ({
               {boundingBoxes && (
                 <InteractiveOverlays
                   tasks={tasks}
+                  editTaskBoundingBox={editTaskBoundingBox}
                   persons={persons}
                   setTasks={setTasks}
                   fileName={fileName}

@@ -15,6 +15,7 @@ import torch
 from django.conf import settings
 from torch import nn
 
+from app.analysis.torch_device import preferred_device, run_with_device_fallback
 from ._wilor_ps_pipeline import (choose_angle_estimator, geometry_angle,
                                  landmark_temporal_decode, palm_normal_angle,
                                  zero_phase_lowpass)
@@ -65,10 +66,14 @@ def _load(device: torch.device):
             checkpoint["input_size"], config["hidden_size"],
             config["layers"], config["dropout"])
         _MODEL.load_state_dict(checkpoint["model"])
-        _MODEL.to(device).eval()
-        _MEAN = torch.as_tensor(checkpoint["mean"], device=device)
-        _STD = torch.as_tensor(checkpoint["std"], device=device)
+        _MEAN = torch.as_tensor(checkpoint["mean"])
+        _STD = torch.as_tensor(checkpoint["std"])
         _CHECKPOINT_PATH = str(path)
+    # Moving an already cached model is important when an MPS operation fails:
+    # the retry must migrate parameters and normalization tensors to CPU.
+    _MODEL.to(device).eval()
+    _MEAN = _MEAN.to(device)
+    _STD = _STD.to(device)
     return _MODEL, _MEAN, _STD
 
 
@@ -110,16 +115,23 @@ def refine_failed_trajectory(raw: np.ndarray, rois: np.ndarray,
                              baseline: np.ndarray, right: bool,
                              fps: float) -> tuple[np.ndarray, dict]:
     """Return a refined relative angle and explicit acceptance diagnostics."""
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model, mean, std = _load(device)
-    features = torch.as_tensor(_features(raw, rois, baseline, right, fps), device=device)
-    inputs = (features - mean) / std
+    feature_values = _features(raw, rois, baseline, right, fps)
     baseline_relative = _center_initial(np.asarray(baseline, float), fps)
-    base = torch.as_tensor(baseline_relative / 180.0, device=device, dtype=torch.float32)
-    with torch.no_grad(), torch.autocast(
-            device_type=device.type, dtype=torch.bfloat16,
-            enabled=device.type == "cuda"):
-        refined = (base + model(inputs[None])[0]).float().cpu().numpy() * 180.0
+
+    def infer(active_device: str) -> np.ndarray:
+        device = torch.device(active_device)
+        model, mean, std = _load(device)
+        features = torch.as_tensor(feature_values, device=device)
+        inputs = (features - mean) / std
+        base = torch.as_tensor(
+            baseline_relative / 180.0, device=device, dtype=torch.float32)
+        with torch.no_grad(), torch.autocast(
+                device_type=device.type, dtype=torch.bfloat16,
+                enabled=device.type == "cuda"):
+            return (base + model(inputs[None])[0]).float().cpu().numpy() * 180.0
+
+    refined, actual_device = run_with_device_fallback(
+        infer, preferred_device(), label="P/S temporal refiner inference")
     refined, cutoff = zero_phase_lowpass(refined, fps, 10.0)
     base_steps = np.abs(np.diff(baseline_relative))
     refined_steps = np.abs(np.diff(refined))
@@ -140,7 +152,7 @@ def refine_failed_trajectory(raw: np.ndarray, rois: np.ndarray,
     accepted = not reasons
     diagnostics = {
         "attempted": True, "accepted": accepted, "rejection_reasons": reasons,
-        "checkpoint": _CHECKPOINT_PATH, "device": str(device),
+        "checkpoint": _CHECKPOINT_PATH, "device": actual_device,
         "baseline_range_5_95_deg": base_range,
         "refined_range_5_95_deg": refined_range,
         "baseline_max_step_deg": base_max,

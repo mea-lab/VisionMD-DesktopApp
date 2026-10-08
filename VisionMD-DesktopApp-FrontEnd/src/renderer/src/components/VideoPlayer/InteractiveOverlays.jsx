@@ -57,6 +57,7 @@ const ResizeHandles = ({ x, y, width, height, onResize, item, index, handleSize 
 
 const InteractiveOverlays = ({
   tasks,
+  editTaskBoundingBox = false,
   persons = [],
   setTasks,
   fileName,
@@ -246,6 +247,8 @@ const InteractiveOverlays = ({
       currentFrameLandmarks[landmarkIdx] = [newX, newY];
       newLandmarks[landMarkIndex] = currentFrameLandmarks;
       data[displayKey] = newLandmarks;
+      data.landmarkUpdateQuality = { status: 'pending', message: 'Landmarks changed. Recalculating…' };
+      data.measures_stale = true;
       task.data = data;
       newTasks[selectedTask] = task;
       // Update our ref immediately.
@@ -260,8 +263,10 @@ const InteractiveOverlays = ({
     window.removeEventListener('pointerup', handleLandmarkDragEnd);
     draggingLandmarkRef.current = null;
 
-    const updatedData = tasksRef.current[selectedTask].data;
-    const updatedLandmarks = landmarksForRole(updatedData, 'display');
+    const editedTask = tasksRef.current[selectedTask];
+    const editedTaskId = editedTask.id;
+    const editedDisplayKey = landmarkKey(editedTask.data, 'display');
+    const updatedLandmarks = landmarksForRole(editedTask.data, 'display');
     
 
     try {
@@ -290,24 +295,35 @@ const InteractiveOverlays = ({
       });
       if (response.ok) {
         const updatedData = await response.json();
-        handleProcessing(true, updatedData);
+        const safeFileName = fileName.replace(/\.[^/.]+$/, '');
+        setTasks(previous => previous.map(task =>
+          task.id === editedTaskId && task.data?.[editedDisplayKey] === updatedLandmarks
+            ? { ...task, data: { ...updatedData, fileName: safeFileName, measures_stale: false } }
+            : task));
       } else {
-        throw new Error('Server responded with an error!');
+        const detail = await response.text();
+        throw new Error(detail || 'The server could not recalculate the corrected landmarks.');
       }
     } catch (error) {
       console.error('Failed to update landmarks:', error);
-    }
-  };
-
-  const handleProcessing = (jsonFileUploaded, jsonContent) => {
-    console.log("Return Data", jsonContent);
-    if (jsonFileUploaded && jsonContent) {
-      const safeFileName = fileName.replace(/\.[^/.]+$/, '');
-      setTasks(prev => {
-        const newTasks = [...prev];
-        newTasks[selectedTask] = { ...newTasks[selectedTask], data: { ...jsonContent, fileName: safeFileName } };
-        return newTasks;
-      });
+      setTasks(previous => previous.map(task =>
+        task.id === editedTaskId && task.data?.[editedDisplayKey] === updatedLandmarks
+          ? { ...task, data: {
+              ...task.data,
+              measures_stale: true,
+              landmarkUpdateQuality: {
+                status: 'failed',
+                message: 'Landmark correction could not be recalculated. The displayed waveform and measures ' +
+                         'are from the previous analysis and do not reflect your latest corrections. ' +
+                         'Correct or move a landmark again to retry, or rerun the analysis.',
+              },
+              analysisQuality: {
+                ...task.data.analysisQuality,
+                status: 'review', label: 'Needs review',
+                reasons: ['Landmark recalculation failed; waveform and measures are stale.'],
+              },
+            } }
+          : task));
     }
   };
 
@@ -361,8 +377,8 @@ const InteractiveOverlays = ({
             strokeWidth={strokeThickness}
             fill="none"
             pointerEvents="stroke"
-            onPointerDown={(!isPlaying && screen === 'tasks') ? (e) => handleTaskDragStart(e, taskToRender, taskIndex) : undefined}
-            style={{ cursor: (!isPlaying && screen === 'tasks') ? 'move' : 'default' }}
+            onPointerDown={(!isPlaying && (screen === 'tasks' || editTaskBoundingBox)) ? (e) => handleTaskDragStart(e, taskToRender, taskIndex) : undefined}
+            style={{ cursor: (!isPlaying && (screen === 'tasks' || editTaskBoundingBox)) ? 'move' : 'default' }}
           />
           {personIdx !== -1 && (
             <text
@@ -377,7 +393,7 @@ const InteractiveOverlays = ({
               {personIdx + 1}
             </text>
           )}
-          {(!isPlaying && screen === 'tasks') && (
+          {(!isPlaying && (screen === 'tasks' || editTaskBoundingBox)) && (
             <ResizeHandles
               x={taskToRender.x}
               y={taskToRender.y}
@@ -395,7 +411,8 @@ const InteractiveOverlays = ({
 
 
       {/* Render interactive landmarks when paused */}
-      {(!isPlaying && landMarkIndex != null && landmarksForRole(tasks?.[selectedTask]?.data, 'display')?.[landMarkIndex]) && (
+      {(!isPlaying && !editTaskBoundingBox && landMarkIndex != null
+        && landmarksForRole(tasks?.[selectedTask]?.data, 'display')?.[landMarkIndex]) && (
         <g className="landmarks-group">
           {(() => {
             const selected = tasks[selectedTask];

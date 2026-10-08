@@ -13,6 +13,7 @@ import os, uuid, time, json, traceback
 
 from .base_task import BaseTask
 from app.analysis.detectors.mp_hand_detector import HandDetector
+from app.analysis.detectors.hand_identity import HandIdentityTracker
 from app.analysis.signal_analyzers.peakfinder_signal_analyzer import PeakfinderSignalAnalyzer
 
 class HandMovementRightTask(BaseTask):
@@ -78,9 +79,19 @@ class HandMovementRightTask(BaseTask):
             self.prepare_video_parameters(request)
 
             # 2. Extract landmarks from video
-            essential_landmarks, all_landmarks = self.extract_landmarks()
-            essential_landmarks = self.interpolate_missing_landmarks(essential_landmarks)
-            all_landmarks = self.interpolate_missing_landmarks(all_landmarks)
+            _, all_landmarks = self.extract_landmarks()
+            all_landmarks, temporal_quality = self.repair_landmark_track(
+                all_landmarks, fps=self.video_fps, return_quality=True
+            )
+            all_landmarks, landmark_quality = self.repair_hand_fingertip_identity(
+                all_landmarks, fps=self.video_fps
+            )
+            landmark_quality["temporal_repair"] = temporal_quality
+            essential_landmarks = [
+                [frame[self.LANDMARKS[key]][:2] for key in
+                 ("INDEX_FINGER_TIP", "MIDDLE_FINGER_TIP", "RING_FINGER_TIP", "WRIST")]
+                for frame in all_landmarks
+            ]
             
             # 3. Calculate normalization factor from landmarks
             normalization_factor = self.calculate_normalization_factor(all_landmarks)
@@ -100,6 +111,9 @@ class HandMovementRightTask(BaseTask):
             output["landMarks"] = essential_landmarks
             output["allLandMarks"] = all_landmarks
             output["normalization_factor"] = normalization_factor
+            output["landmarkGapQuality"] = self.landmark_gap_quality
+            output["handSelectionQuality"] = self.hand_selection_quality
+            output["landmarkQuality"] = landmark_quality
 
         except Exception as e:
             return Response(f"{e}", status=500)
@@ -184,6 +198,7 @@ class HandMovementRightTask(BaseTask):
 
     def extract_landmarks(self) -> tuple:
         detector = HandDetector().get_detector()
+        hand_tracker = HandIdentityTracker("Right")
         essential_landmarks = []
         all_landmarks = []
         enlarged_coords = (
@@ -217,13 +232,10 @@ class HandMovementRightTask(BaseTask):
             timestamp = int(current_frame_idx / self.video_fps * 1000)
             detection_result = detector.detect_for_video(image, timestamp)
 
-            hand_index = -1
-            handedness = detection_result.handedness
-            for idx in range(0, len(handedness)):
-                if handedness[idx][0].category_name == "Right":
-                    hand_index = idx
-                
-            if hand_index == -1 or not detection_result.hand_landmarks[hand_index]:
+            hand_index = hand_tracker.select(
+                detection_result, image_data.shape[1], image_data.shape[0]
+            )
+            if hand_index is None:
                 essential_landmarks.append([])
                 all_landmarks.append([])
             else:
@@ -240,10 +252,13 @@ class HandMovementRightTask(BaseTask):
 
         video.release()
         detector.close()
+        self.hand_selection_quality = {
+            "version": "visionmd-hand-identity-v1",
+            "label_override_count": hand_tracker.label_override_count,
+            "rejected_frame_count": hand_tracker.rejected_frame_count,
+        }
 
-        missing_percent = sum(1 for x in essential_landmarks if not x) / len(essential_landmarks)
-        if missing_percent > 0.1:
-            raise Exception((f"Right hand could not be found in more than 10% of the frames. The video quality may be too low or the video may not be a hand movement task."))
+        self.check_landmark_gaps(essential_landmarks, "hand movement right")
         
         return essential_landmarks, all_landmarks
 

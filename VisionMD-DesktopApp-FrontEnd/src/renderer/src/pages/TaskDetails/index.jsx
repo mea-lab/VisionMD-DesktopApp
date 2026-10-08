@@ -46,6 +46,7 @@ const TaskDetails = () => {
   
   const navigate = useNavigate();
   const [openJsonUpload, setOpenJsonUpload] = useState(false);
+  const [editingBox, setEditingBox] = useState(false);
   const [analyzingAll, setAnalyzingAll] = useState(false);
   const [selectedTask, setSelectedTask] = useState(0);
   const [TaskModule, setTaskModule] = useState(null);
@@ -53,6 +54,12 @@ const TaskDetails = () => {
   const [taskErrors, setTaskErrors] = useState({});
   const [analysisJobs, setAnalysisJobs] = useState({});
   const dropdownRef = useRef(null);
+
+  useEffect(() => { setEditingBox(false); }, [selectedTask]);
+  useEffect(() => {
+    if (editingBox) clearTaskError(tasks?.[selectedTask]?.id);
+  }, [tasks?.[selectedTask]?.x, tasks?.[selectedTask]?.y,
+      tasks?.[selectedTask]?.box_width, tasks?.[selectedTask]?.box_height]);
 
   useEffect(() => {
     if(!videoId) {
@@ -270,6 +277,7 @@ const TaskDetails = () => {
             videoData={videoData}
             videoRef={videoRef}
             screen="taskDetails"
+            editTaskBoundingBox={editingBox && !analyzingAll && !openJsonUpload}
             boundingBoxes={boundingBoxes}
             setBoundingBoxes={setBoundingBoxes}
             fps={fps}
@@ -310,12 +318,21 @@ const TaskDetails = () => {
             </select>
 
             <AnalysisQualityBadge quality={currentTask?.data?.analysisQuality} />
-            {currentTask?.data?.psPipeline?.engine === 'mediapipe_world_landmarks' && (
+          {currentTask?.data?.psPipeline?.engine === 'mediapipe_world_landmarks' && (
               <button className={btn} onClick={reanalyzePsWithWilor}
                 title="Discard the provisional MediaPipe result and run the full YOLO + WiLoR pipeline">
                 Reanalyze with WiLoR
               </button>
             )}
+
+            <button className={btn}
+              disabled={analyzingAll || openJsonUpload || !currentTask}
+              onClick={() => {
+                videoRef.current?.pause();
+                setEditingBox(value => !value);
+              }}>
+              {editingBox ? 'Done editing box' : 'Edit bounding box'}
+            </button>
 
             {/* Reset */}
             <button className={btn} onClick={resetTask}>
@@ -366,11 +383,39 @@ const TaskDetails = () => {
               data-shortcut-action="analyze-all"
               className={btn}
               onClick={analyzeAllTasks}
-              disabled={analyzingAll || !tasks.some(t => t.data == null)}
+              disabled={editingBox || analyzingAll || !tasks.some(t => t.data == null)}
             >
               Analyze All
             </button>
           </div>
+
+          {editingBox && (
+            <div className="mx-10 mb-3 rounded-md border border-blue-400 px-3 py-2 text-sm text-gray-100">
+              Drag the green border or its handles to adjust the box. Changing it clears
+              the current analysis. Select Done editing box, then Analyze to rerun.
+            </div>
+          )}
+          {currentTask?.data?.landmarkUpdateQuality && (
+            <div role="alert"
+              className={`mx-10 mb-3 rounded-md border px-3 py-2 text-sm ${
+                currentTask.data.landmarkUpdateQuality.status === 'failed'
+                  ? 'border-red-500 bg-red-50 text-red-900'
+                  : 'border-amber-500 bg-amber-50 text-amber-900'}`}>
+              {currentTask.data.landmarkUpdateQuality.message}
+            </div>
+          )}
+          {currentTask?.data?.featureEstimationQuality?.status === 'needs_correction' && (
+            <div className="mx-10 mb-3 rounded-md border border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {currentTask.data.featureEstimationQuality.message}
+            </div>
+          )}
+          {currentTask?.data?.landmarkGapQuality?.needs_review && (
+            <div className="mx-10 mb-3 rounded-md border border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Tracking gaps were filled to provide an editable result. These measures
+              are provisional. Pause the video and correct the landmark positions,
+              or adjust the bounding box and rerun the analysis.
+            </div>
+          )}
 
           {currentTask?.data?.psPipeline?.engine === 'yolo_wilor'
             && currentTask?.data?.psPipeline?.screening?.accepted === false && (
@@ -391,6 +436,7 @@ const TaskDetails = () => {
                   className={`${btn} text-base`}
                   onClick={() => {
                     clearTaskError(currentTaskId);
+                    setEditingBox(false);
                     setOpenJsonUpload(true);
                   }}
                 >
@@ -434,7 +480,7 @@ const TaskDetails = () => {
                 <button
                   data-shortcut-action="analyze"
                   className={`${btn} text-base`}
-                  onClick={() => setOpenJsonUpload(true)}
+                  onClick={() => { setEditingBox(false); setOpenJsonUpload(true); }}
                 >
                   Analyze
                 </button>

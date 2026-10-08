@@ -59,3 +59,5 @@ VisionMD-DesktopApp-BackEnd/app/analysis/models/metrabs_pytorch/**/*.pyc
 VisionMD-DesktopApp-BackEnd/app/analysis/models/metrabs_pytorch/scripts/*.pt
 VisionMD-DesktopApp-BackEnd/app/analysis/models/metrabs_eff2l_384px_800k_28ds_pytorch/
 VisionMD-DesktopApp-BackEnd/app/analysis/models/wilor_mini/pretrained_models/
+VisionMD-DesktopApp-BackEnd/app/analysis/models/wilor_mini/pretrained_models.zip
+VisionMD-DesktopApp-BackEnd/dist.before-*/
