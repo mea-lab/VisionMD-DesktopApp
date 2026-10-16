@@ -41,6 +41,15 @@ def update_gait_segments(request):
         if fps <= 0 or frame_count < 2 or any(len(item) != frame_count for item in arrays):
             raise ValueError("The cached gait arrays are incomplete or inconsistent.")
 
+        cache_end = start_time + (frame_count - 1) / fps
+        walking = payload.get('walking_range') or {'start': start_time, 'end': cache_end}
+        walk_start, walk_end = float(walking['start']), float(walking['end'])
+        if (not np.isfinite([walk_start, walk_end]).all() or walk_start < start_time
+                or walk_end > cache_end or walk_end <= walk_start):
+            raise ValueError('Walking range must be inside the cached gait range.')
+        first = max(0, int(np.ceil((walk_start - start_time) * fps - 1e-7)))
+        stop = min(frame_count, int(np.floor((walk_end - start_time) * fps + 1e-7)) + 1)
+
         task = GaitTask()
         task.fps = fps
         task.start_time = start_time
@@ -52,7 +61,8 @@ def update_gait_segments(request):
             selected_start = float(selected["start_time_seconds"])
             selected_end = float(selected["end_time_seconds"])
             cache_end = start_time + (frame_count - 1) / fps
-            if selected_start < start_time or selected_end > cache_end or selected_end <= selected_start:
+            if (not np.isfinite([selected_start, selected_end]).all() or selected_start < walk_start
+                    or selected_end > walk_end or selected_end <= selected_start):
                 raise ValueError(
                     f"Turn interval must be inside {start_time:.3f}-{cache_end:.3f} seconds."
                 )
@@ -79,6 +89,7 @@ def update_gait_segments(request):
             poses_mirrored,
             turning_metadata,
             spatial_calibration=spatial_calibration,
+            walking_range=(first, stop),
         )
         averages = task.calculate_average_features(
             analysis["results"], analysis["results_mirrored"]
@@ -97,6 +108,7 @@ def update_gait_segments(request):
         output["landmark_colors"] = task.calculate_landmark_colors(
             poses, gait_events, fps
         ).tolist()
+        output["walking_range"] = {"start": walk_start, "end": walk_end}
         output["turning_metadata"] = turning_metadata
         output["segment_metrics"] = analysis["segment_metrics"]
         output["gait_quality"] = {

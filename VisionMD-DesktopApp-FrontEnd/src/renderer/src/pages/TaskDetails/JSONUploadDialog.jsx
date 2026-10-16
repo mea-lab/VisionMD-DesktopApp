@@ -1,3 +1,4 @@
+import { useRequiredGaitHeight, isGait } from '../../components/ParticipantHeight';
 // src/pages/TaskDetails/JSONUploadDialog.jsx
 import { useState, useContext } from 'react';
 import Dialog from '@mui/material/Dialog';
@@ -25,23 +26,30 @@ export default function JSONUploadDialog({
     videoId,
     fps,
     tasks,
+    setTasks,
     boundingBoxes,
   } = useContext(VideoContext);
 
+  const { ensureHeight, heightDialog } = useRequiredGaitHeight(tasks, setTasks);
   const [fileError, setFileError] = useState('');
   const [jsonContent, setJSONContent] = useState(null);
   const [serverProcessing, setServerProcessing] = useState(false);
   const [analysisJob, setAnalysisJob] = useState(null);
   const { theme } = useTheme();
 
-  const handleClose = async () => {
-    if (analysisJob?.id && ['queued', 'running'].includes(analysisJob.status)) {
-      const cancelled = await cancelAnalysisJob(analysisJob.id);
-      if (cancelled) setAnalysisJob(cancelled);
-      return;
-    }
+  const handleClose = () => {
+    if (serverProcessing) return;
     setDialogOpen(false);
     setFileError('');
+  };
+  const handleCancel = async () => {
+    if (!analysisJob?.id || analysisJob.cancelRequested) return;
+    try {
+      const cancelled = await cancelAnalysisJob(analysisJob.id);
+      if (cancelled) setAnalysisJob(cancelled);
+    } catch (error) {
+      setFileError(error.message || 'Could not cancel analysis.');
+    }
   };
 
   const handleJSONProcess = () => {
@@ -74,6 +82,11 @@ export default function JSONUploadDialog({
   const fetchAnalysisDetails = async () => {
     try {
       let taskData = tasks[selectedTask];
+      if (isGait(taskData)) {
+        const height = await ensureHeight(taskData);
+        if (!height) return;
+        taskData = { ...taskData, height };
+      }
 
       const chosenTaskBox = tasks.find(box => box.id === taskData.id);
       const taskBoxCords = {
@@ -129,9 +142,12 @@ export default function JSONUploadDialog({
   };
 
   return (
+      <>
+      {heightDialog}
       <Dialog 
         open={dialogOpen} 
         onClose={handleClose}
+        disableEscapeKeyDown={serverProcessing}
         PaperProps={{
           sx: {
             backgroundColor: theme === 'light' ? '#ffffff' : '#333338',
@@ -144,7 +160,7 @@ export default function JSONUploadDialog({
         <DialogTitle className='text-gray-100'>
           <div className='flex flex-row w-full justify-between items-center'>
             Task Setup
-            <IconButton onClick={handleClose}>
+            <IconButton onClick={handleClose} disabled={serverProcessing}>
               <CloseIcon className='text-gray-100'/>
             </IconButton>
           </div>
@@ -197,7 +213,8 @@ export default function JSONUploadDialog({
                 <CircularProgress className='my-4' size={80} />
                 <button
                   className='rounded-md border border-red-500 px-3 py-1 text-red-500 hover:bg-red-50'
-                  onClick={handleClose}
+                  onClick={handleCancel}
+                  disabled={!analysisJob?.id || analysisJob?.cancelRequested}
                 >
                   {analysisJob?.cancelRequested ? 'Cancelling…' : 'Cancel analysis'}
                 </button>
@@ -229,5 +246,6 @@ export default function JSONUploadDialog({
           )}
         </DialogActions>
       </Dialog>
+      </>
   );
 }

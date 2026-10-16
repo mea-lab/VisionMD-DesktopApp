@@ -3,6 +3,9 @@
 One worker deliberately serializes GPU jobs. That keeps Electron/Django request
 threads responsive and prevents simultaneous models from exhausting VRAM.
 """
+import json
+import math
+
 from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -71,6 +74,13 @@ def create_analysis_job(request, task_name):
     raw_json = request.POST.get("json_data")
     if not video_id or raw_json is None:
         return JsonResponse({"error": "id and json_data are required"}, status=400)
+    if task_name == 'gait':
+        try:
+            height = float(json.loads(raw_json).get('height'))
+            if not math.isfinite(height) or height <= 0:
+                raise ValueError()
+        except (ValueError, TypeError, AttributeError):
+            return JsonResponse({'error': 'Enter a positive participant height before gait analysis.'}, status=400)
     job_id = str(uuid4())
     job = {
         "id": job_id,

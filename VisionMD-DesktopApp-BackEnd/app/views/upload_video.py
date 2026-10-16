@@ -12,6 +12,8 @@ import shutil
 import os, sys
 import traceback
 from functools import lru_cache
+from django.core.cache import cache
+from fractions import Fraction
 
 def get_ffmpeg_path():
     if getattr(sys, 'frozen', False):
@@ -521,10 +523,13 @@ def _supports_strip_fps(ffmpeg_path):
     return result.returncode == 0 and 'strip_fps' in result.stdout
 
 
-def _normalization_probe(input_path):
+def _normalization_probe(input_path, inspect_timestamps=False):
     """Read normalization metadata and count frames in one decode pass."""
     cmd = [get_ffprobe_path(), '-v', 'error', '-count_frames',
            '-show_streams', '-show_format', '-of', 'json', input_path]
+    if inspect_timestamps:
+        cmd[1:1] = ['-show_frames', '-show_entries',
+                     'frame=media_type,best_effort_timestamp_time:stream:format']
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode:
         raise RuntimeError(f"FFprobe normalization check failed:\n{result.stderr}")
@@ -537,7 +542,24 @@ def _normalization_probe(input_path):
     if count < 1 or not duration > 0:
         raise RuntimeError('Could not determine decoded video frame timing.')
     audio = next((s for s in data.get('streams', []) if s.get('codec_type') == 'audio'), None)
-    return {'video': video, 'audio': audio, 'frame_count': count, 'duration': duration}
+    summary = {'video': video, 'audio': audio, 'frame_count': count, 'duration': duration}
+    if inspect_timestamps:
+        timestamps = [float(f['best_effort_timestamp_time']) for f in data.get('frames', [])
+                      if 'best_effort_timestamp_time' in f and f.get('media_type', 'video') == 'video']
+        # Allow container time-base rounding (e.g. alternating 33/34 ms ticks),
+        # but reject gaps, duplicate timestamps, and accumulated timing drift.
+        summary['is_cfr'] = False
+        if len(timestamps) == count and count > 1:
+            step = (timestamps[-1] - timestamps[0]) / (count - 1)
+            tick = float(Fraction(video.get('time_base', '1/1000000')))
+            tolerance = max(2e-6, tick * 1.1)
+            summary['is_cfr'] = step > 0 and all(
+                (i == 0 or timestamp > timestamps[i - 1])
+                and abs(timestamp - (timestamps[0] + i * step)) <= tolerance
+                for i, timestamp in enumerate(timestamps))
+        elif len(timestamps) == count == 1:
+            summary['is_cfr'] = True
+    return summary
 
 
 def _square_pixel_size(video):
@@ -558,7 +580,7 @@ def _square_pixel_size(video):
     return target_width + target_width % 2, height
 
 
-def normalize_video(input_path, add_audio=True):
+def normalize_video(input_path, add_audio=True, progress=None, preserve_cfr=False):
     """Normalize in at most one FFmpeg pass, preserving decoded video frames.
 
     Keep the current libx264 quality settings. Compatible zero-based CFR MP4
@@ -567,12 +589,17 @@ def normalize_video(input_path, add_audio=True):
     Preserve the previous FFmpeg orientation behavior: encoding autorotates
     pixels, while stream-copy operations retain the source display metadata.
     """
-    source = _normalization_probe(input_path)
+    report = progress or (lambda message: None)
+    report("Checking frame timing and counting video frames…")
+    source = _normalization_probe(input_path, inspect_timestamps=True)
     video, audio = source['video'], source['audio']
     count, duration = source['frame_count'], source['duration']
+    if preserve_cfr and source['is_cfr']:
+        report('Constant frame rate confirmed. Using the original video.')
+        return {'path': input_path, 'source_frame_count': count,
+                'source_duration': duration, 'frame_count': count, 'duration': duration}
     first_timestamp = probe_first_video_timestamp(input_path)
-    retime = (video.get('r_frame_rate') != video.get('avg_frame_rate')
-              or abs(first_timestamp) > .001)
+    retime = not source['is_cfr'] or abs(first_timestamp) > .001
     geometry = dict(video)
     rotation = next((float(item['rotation']) for item in video.get('side_data_list', [])
                      if 'rotation' in item), float(video.get('tags', {}).get('rotate', 0)))
@@ -648,11 +675,14 @@ def normalize_video(input_path, add_audio=True):
         if encode_audio and abs(first_timestamp) > .001:
             cmd += ['-af', 'asetpts=PTS-STARTPTS']
     cmd += ['-movflags', '+faststart', output]
+    report('Converting variable frame rate video… This can take several minutes.'
+           if retime else 'Preparing video format and audio…')
     try:
         result = subprocess.run(cmd, capture_output=True,
                                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         if result.returncode:
             raise RuntimeError(f"FFmpeg normalization failed:\n{result.stderr.decode('utf-8', errors='replace')}")
+        report('Verifying converted frame count and duration…')
         normalized = _normalization_probe(output)
         if normalized['frame_count'] != count:
             raise RuntimeError(f"Normalization changed decoded frames from {count} "
@@ -677,9 +707,21 @@ def normalize_video(input_path, add_audio=True):
             os.remove(output)
 
 
+@api_view(['GET'])
+def upload_progress(request):
+    upload_id = request.query_params.get('upload_id', '')
+    return Response(cache.get(f'video-upload:{upload_id}') or
+                    {'message': 'Transferring video to VisionMD…'})
+
+
 @api_view(['POST'])
 def upload_video(request):
+    upload_id = request.query_params.get('upload_id', '')[:80]
+    def report(message):
+        if upload_id:
+            cache.set(f'video-upload:{upload_id}', {'message': message}, timeout=3600)
     try:
+        report('Saving uploaded video…')
         print("Started processing video upload...")
         if 'video' not in request.FILES:
             return Response(
@@ -742,7 +784,8 @@ def upload_video(request):
         # Capture the source's decoded video frames before any normalization.
         # This is the invariant that matters; nominal FPS and container
         # ``nb_frames`` fields are not reliable for VFR phone recordings.
-        normalized = normalize_video(saved_video_path)
+        normalized = normalize_video(saved_video_path, progress=report, preserve_cfr=True)
+        report('Creating project thumbnail and metadata…')
         saved_video_path = normalized['path']
         source_frame_count = normalized['source_frame_count']
         source_duration = normalized['source_duration']
@@ -750,6 +793,11 @@ def upload_video(request):
         file_type = os.path.splitext(original_filename)[1].lstrip('.')
         cap2 = cv2.VideoCapture(saved_video_path)
         ret, frame = cap2.read()
+        # OpenCV's FFmpeg backend normally applies the display matrix itself.
+        # Metadata rotation is the correction still needed by analysis readers,
+        # which use the same default VideoCapture orientation behavior.
+        auto_rotated = (bool(cap2.get(cv2.CAP_PROP_ORIENTATION_AUTO))
+                        and bool(cap2.get(cv2.CAP_PROP_ORIENTATION_META)))
         cap2.release()
         frame_count, decoded_duration = normalized["frame_count"], normalized["duration"]
         fps = frame_count / decoded_duration
@@ -764,7 +812,7 @@ def upload_video(request):
         if not fps or fps <= 0:
             raise RuntimeError(f"Invalid FPS after normalization: {fps}")
 
-        rotation = get_rotation(saved_video_path)
+        rotation = 0 if auto_rotated else get_rotation(saved_video_path)
         rotation_map = {
             90: cv2.ROTATE_90_CLOCKWISE,
             180: cv2.ROTATE_180,
@@ -811,6 +859,7 @@ def upload_video(request):
             json.dump(metadata_wrapped, jf, indent=4)
 
         # Return the metadata as JSON
+        report('Import complete.')
         return Response(metadata_wrapped, status=200)
     except Exception as e:
         print(traceback.format_exc())

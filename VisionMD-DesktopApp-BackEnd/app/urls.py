@@ -3,7 +3,7 @@ from app.views.get_bounding_boxes import get_bounding_boxes
 from app.views.update_plot_data import updatePlotData
 from app.views.update_landmarks import update_landmarks
 from app.views.create_task_views import generate_task_urlpatterns
-from app.views.upload_video import upload_video
+from app.views.upload_video import upload_video, upload_progress
 from app.views.get_video_data import get_video_data
 from app.views.get_video_metadata import get_video_metadata
 from app.views.update_video_data import update_video_data
@@ -27,6 +27,7 @@ urlpatterns = [
 
     # POST Requests
     path('upload_video/', upload_video),
+    path('upload_video/progress/', upload_progress),
     path('import_project_snapshot/', import_project_snapshot),
     path('analysis_jobs/<str:task_name>/', create_analysis_job),
     path('analysis_jobs/status/<uuid:job_id>/', analysis_job),

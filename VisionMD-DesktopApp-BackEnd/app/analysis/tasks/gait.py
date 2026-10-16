@@ -307,6 +307,7 @@ class GaitTask(BaseTask):
         poses_mirrored,
         turning_metadata,
         spatial_calibration=None,
+        walking_range=None,
     ):
         """Analyze non-turning portions and pool their individual gait events."""
         spatial_calibration = spatial_calibration or {"scale_factor": 1.0}
@@ -321,6 +322,11 @@ class GaitTask(BaseTask):
             ]
         else:
             candidate_ranges = [(0, frame_count)]
+
+        if walking_range is not None:
+            first, stop = walking_range
+            candidate_ranges = [(max(a, first), min(b, stop)) for a, b in candidate_ranges
+                                if min(b, stop) > max(a, first)]
 
         original_samples, mirrored_samples = [], []
         original_steady_steps, mirrored_steady_steps = [], []
@@ -562,7 +568,7 @@ class GaitTask(BaseTask):
             'width': new_width,
             'height': new_height
         }
-        height_cm = int(json_data.get('height')) if json_data.get('height') else None
+        height_cm = float(json_data.get('height')) if json_data.get('height') else None
 
 
         # Getting camera properties
@@ -594,7 +600,7 @@ class GaitTask(BaseTask):
             print("Len of subject bounding boxes", len(subject_bounding_boxes))
             raise Exception("Subject bounding boxes not found in all frames of the task. The chosen subject may not be correct.")
 
-        if(height_cm == None):
+        if height_cm is None or not np.isfinite(height_cm) or height_cm <= 0:
             raise Exception("Invalid or missing height.")
 
 

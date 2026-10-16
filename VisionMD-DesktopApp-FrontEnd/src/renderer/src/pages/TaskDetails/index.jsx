@@ -1,3 +1,4 @@
+import { useRequiredGaitHeight, isGait } from '../../components/ParticipantHeight';
 //src/pages/TaskDetails/index.jsx
 import {
   useContext,
@@ -44,6 +45,7 @@ const TaskDetails = () => {
     persons,
   } = useContext(VideoContext);
   
+  const { ensureHeight, heightDialog } = useRequiredGaitHeight(tasks, setTasks);
   const navigate = useNavigate();
   const [openJsonUpload, setOpenJsonUpload] = useState(false);
   const [editingBox, setEditingBox] = useState(false);
@@ -142,8 +144,13 @@ const TaskDetails = () => {
 
   const autoAnalyzeTask = async taskId => {
     try {
-      const taskData = tasks.find(t => t.id === taskId);
+      let taskData = tasks.find(t => t.id === taskId);
       if (!taskData) throw new Error(`Task with id ${taskId} not found`);
+      if (isGait(taskData)) {
+        const height = await ensureHeight(taskData);
+        if (!height) return false;
+        taskData = { ...taskData, height };
+      }
 
       const chosenTaskBox = tasks.find(box => box.id === taskData.id);
       const taskBoxCords = {
@@ -221,7 +228,7 @@ const TaskDetails = () => {
 
     for (const task of tasks) {
       if (!task?.data) {
-        await autoAnalyzeTask(task.id);
+        if (!(await autoAnalyzeTask(task.id))) break;
       }
     }
     setAnalyzingAll(false);
@@ -488,6 +495,7 @@ const TaskDetails = () => {
             )}
           </div>
 
+          {heightDialog}
           {/* Keep the dialog mounted so it can open from any state */}
           <JSONUploadDialog
             dialogOpen={openJsonUpload}

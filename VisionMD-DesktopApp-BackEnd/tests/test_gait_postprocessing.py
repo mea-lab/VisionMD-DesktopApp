@@ -1,5 +1,6 @@
 import numpy as np
 import json
+import pytest
 from rest_framework.test import APIRequestFactory
 
 from app.analysis.signal_analyzers.gait_signal_analyzer import GaitSignalAnalyzer
@@ -341,7 +342,8 @@ def test_boundary_step_filter_discards_outer_steps_when_possible():
     assert np.array_equal(filtered["right_up"], events["right_up"])
 
 
-def test_gait_segment_endpoint_reuses_cached_model_outputs(monkeypatch):
+@pytest.mark.parametrize("walking_range", [None, {"start": 1.0, "end": 5.0}])
+def test_gait_segment_endpoint_reuses_cached_model_outputs(monkeypatch, walking_range):
     class StubAnalyzer:
         @staticmethod
         def analyze(
@@ -401,6 +403,8 @@ def test_gait_segment_endpoint_reuses_cached_model_outputs(monkeypatch):
             "end_time_seconds": 4.0,
         },
     }
+    if walking_range is not None:
+        payload["walking_range"] = walking_range
     request = APIRequestFactory().post(
         "/api/update_gait_segments/",
         {"json_data": json.dumps(payload)},
@@ -420,6 +424,9 @@ def test_gait_segment_endpoint_reuses_cached_model_outputs(monkeypatch):
     assert response.data["gait_quality"]["steady_step_gait"]["boundary_exclusion_seconds"] == 2.0
     assert response.data["gait_quality"]["spatial_calibration"] == cache["spatial_calibration"]
     assert len(response.data["segment_metrics"]) == 2
+    if walking_range is not None:
+        assert response.data['walking_range'] == walking_range
+        assert [(s['start_frame'], s['end_frame']) for s in response.data['segment_metrics']] == [(30,59),(121,150)]
 
 
 def test_turn_p95_speed_resists_one_frame_orientation_spike():
@@ -453,3 +460,13 @@ def test_gait_identity_correction_is_shared_with_display_landmarks():
     assert swap_mask[-1, 0]
     assert corrected3d[-1, left, 0] == 500.0
     assert corrected2d[-1, left, 0] == 150.0
+
+
+@pytest.mark.parametrize('height', [None, '', 0, -170, 'nan', 'inf', 'invalid'])
+def test_gait_job_rejects_missing_or_invalid_height(height):
+    from app.views.analysis_jobs import create_analysis_job
+    request = APIRequestFactory().post('/?id=00000000',
+        {'json_data': json.dumps({'height': height})}, format='multipart')
+    response = create_analysis_job(request, 'gait')
+    assert response.status_code == 400
+    assert 'height' in json.loads(response.content)['error']

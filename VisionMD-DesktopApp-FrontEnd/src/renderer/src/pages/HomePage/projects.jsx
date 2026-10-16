@@ -33,10 +33,10 @@ const fetchVideos = async (url, signal) => {
 };
 
 
-const uploadVideo = async (file) => {
+const uploadVideo = async (file, uploadId) => {
   const form = new FormData();
   form.append('video', file);
-  const res = await fetch(`${BASE_URL}/api/upload_video/`, {
+  const res = await fetch(`${BASE_URL}/api/upload_video/?upload_id=${uploadId}`, {
     method: 'POST',
     body: form,
   });
@@ -295,6 +295,7 @@ export default function Projects() {
   const [loading, setLoading] = useState(() => cachedProjects === null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [uploadError, setUploadError] = useState(null);
+  const [uploadStatus, setUploadStatus] = useState('');
   const fileInputRef = useRef();
   const [loadError, setLoadError] = useState(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -337,18 +338,35 @@ export default function Projects() {
   }, []);
 
   const handleFiles = async e => {
-    setDialogOpen(true);
     const file = e.target.files[0];
-
     if (!file) return;
+    setUploadError(null);
+    setUploadStatus('Transferring video to VisionMD…');
+    setDialogOpen(true);
+    const uploadId = crypto.randomUUID();
+    let stopped = false;
+    let timer;
+    const poll = async () => {
+      try {
+        const res = await fetch(`${BASE_URL}/api/upload_video/progress/?upload_id=${uploadId}`);
+        if (res.ok) {
+          const status = await res.json();
+          if (!stopped) setUploadStatus(status.message);
+        }
+      } catch { /* Import continues if progress is temporarily unavailable. */ }
+      if (!stopped) timer = setTimeout(poll, 1000);
+    };
+    poll();
     try {
-      const response_metadata = await uploadVideo(file);
+      const response_metadata = await uploadVideo(file, uploadId);
       setVideos(v => [response_metadata, ...(v ?? [])]);
       setDialogOpen(false);
     } catch(error) {
       setUploadError(error.message || String(error));
       console.error('Video upload failed:', error);
     } finally {
+      stopped = true;
+      clearTimeout(timer);
       e.target.value = null; 
     }
   };
@@ -400,6 +418,7 @@ export default function Projects() {
           dialogOpen={dialogOpen}
           setDialogOpen={setDialogOpen}
           uploadError={uploadError}
+          uploadStatus={uploadStatus}
           setUploadError={setUploadError}
         />
       )}

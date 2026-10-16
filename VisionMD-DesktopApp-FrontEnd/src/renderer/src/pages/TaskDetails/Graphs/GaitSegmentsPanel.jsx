@@ -45,6 +45,12 @@ const GaitSegmentsPanel = ({
   const [expanded, setExpanded] = useState(true);
   const [hasTurn, setHasTurn] = useState(Boolean(metadata.is_turning));
   const [turnRange, setTurnRange] = useState(detectedRange);
+  const [walkingRange, setWalkingRange] = useState(data.walking_range || { start: cacheStart, end: cacheEnd });
+  const walkingRef = useRef(walkingRange);
+  walkingRef.current = walkingRange;
+  const turnRef = useRef({ hasTurn, turnRange });
+  turnRef.current = { hasTurn, turnRange };
+  useEffect(() => { setWalkingRange(data.walking_range || { start: cacheStart, end: cacheEnd }); }, [data.walking_range, cacheStart, cacheEnd]);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState('');
 
@@ -58,28 +64,34 @@ const GaitSegmentsPanel = ({
     if (!regions) return;
     syncingRef.current = true;
     regions.clearRegions();
+    const walkStart = walkingRef.current.start;
+    const walkEnd = walkingRef.current.end;
+    if (!Number.isFinite(walkStart) || !Number.isFinite(walkEnd) || walkEnd <= walkStart) {
+      syncingRef.current = false;
+      return;
+    }
     if (!turnEnabled) {
       regions.addRegion({
-        id: 'walking-all', start: cacheStart, end: cacheEnd,
-        drag: false, resize: false, color: 'rgba(37, 99, 235, 0.30)',
+        id: 'walking-all', start: walkStart, end: walkEnd,
+        drag: false, resize: true, resizeStart: true, resizeEnd: true, color: 'rgba(37, 99, 235, 0.30)',
       });
     } else {
-      const start = clamp(range.start, cacheStart, cacheEnd);
-      const end = clamp(range.end, start, cacheEnd);
-      if (start > cacheStart) {
+      const start = clamp(range.start, walkStart, walkEnd);
+      const end = clamp(range.end, start, walkEnd);
+      if (start > walkStart) {
         regions.addRegion({
-          id: 'walking-before', start: cacheStart, end: start,
-          drag: false, resize: false, color: 'rgba(37, 99, 235, 0.30)',
+          id: 'walking-before', start: walkStart, end: start,
+          drag: false, resize: true, resizeStart: true, resizeEnd: false, color: 'rgba(37, 99, 235, 0.30)',
         });
       }
       regions.addRegion({
         id: 'turn', start, end, drag: true, resize: true,
         color: 'rgba(239, 68, 68, 0.42)',
       });
-      if (end < cacheEnd) {
+      if (end < walkEnd) {
         regions.addRegion({
-          id: 'walking-after', start: end, end: cacheEnd,
-          drag: false, resize: false, color: 'rgba(34, 197, 94, 0.28)',
+          id: 'walking-after', start: end, end: walkEnd,
+          drag: false, resize: true, resizeStart: false, resizeEnd: true, color: 'rgba(34, 197, 94, 0.28)',
         });
       }
     }
@@ -96,7 +108,8 @@ const GaitSegmentsPanel = ({
       height: 82,
       waveColor: '#6b7280',
       progressColor: '#374151',
-      cursorColor: '#f3f4f6',
+      cursorColor: '#111827',
+      cursorWidth: 3,
       barWidth: 2,
       barRadius: 2,
       normalize: true,
@@ -113,17 +126,26 @@ const GaitSegmentsPanel = ({
     wave.on('ready', () => {
       const duration = videoRef.current?.duration || cacheEnd;
       wave.zoom(Math.max(1, 720 / duration));
-      renderRegions(Boolean(metadata.is_turning), detectedRange);
+      renderRegions(turnRef.current.hasTurn, turnRef.current.turnRange);
     });
     regions.on('region-updated', region => {
-      if (syncingRef.current || region.id !== 'turn') return;
-      const next = {
-        start: Number(region.start.toFixed(3)),
-        end: Number(region.end.toFixed(3)),
-      };
-      setTurnRange(next);
-      // Walking regions are always the complement of the selected turn.
-      renderRegions(true, next);
+      if (syncingRef.current) return;
+      const { hasTurn: turnEnabled, turnRange: currentTurn } = turnRef.current;
+      const currentWalk = walkingRef.current;
+      const gap = fps > 0 ? 1 / fps : 0.001;
+      const rounded = value => Number(value.toFixed(3));
+      if (region.id === 'turn') {
+        const start = clamp(rounded(region.start), currentWalk.start, currentWalk.end - gap);
+        const end = clamp(rounded(region.end), start + gap, currentWalk.end);
+        setTurnRange({ start, end });
+      } else if (['walking-before', 'walking-after', 'walking-all'].includes(region.id)) {
+        const start = region.id === 'walking-after' ? currentWalk.start
+          : clamp(rounded(region.start), cacheStart,
+              turnEnabled ? currentTurn.start - gap : currentWalk.end - gap);
+        const end = region.id === 'walking-before' ? currentWalk.end
+          : clamp(rounded(region.end), turnEnabled ? currentTurn.end + gap : start + gap, cacheEnd);
+        setWalkingRange({ start, end });
+      }
     });
     wave.on('interaction', time => {
       if (videoRef.current) videoRef.current.currentTime = time;
@@ -150,7 +172,7 @@ const GaitSegmentsPanel = ({
 
   useEffect(() => {
     if (waveRef.current) renderRegions(hasTurn, turnRange);
-  }, [hasTurn]);
+  }, [hasTurn, walkingRange, turnRange]);
 
   const updateBoundary = (field, rawValue) => {
     const value = Number(rawValue);
@@ -169,6 +191,7 @@ const GaitSegmentsPanel = ({
       const form = new FormData();
       form.append('json_data', JSON.stringify({
         task_data: data,
+        walking_range: walkingRange,
         turning_segment: {
           is_turning: hasTurn,
           start_time_seconds: turnRange.start,
@@ -190,10 +213,10 @@ const GaitSegmentsPanel = ({
     }
   };
 
-  const invalidRange = hasTurn && (
-    turnRange.start < cacheStart || turnRange.end > cacheEnd ||
-    turnRange.end <= turnRange.start
-  );
+  const invalidRange = !Number.isFinite(walkingRange.start) || !Number.isFinite(walkingRange.end)
+    || walkingRange.start < cacheStart || walkingRange.end > cacheEnd || walkingRange.end <= walkingRange.start
+    || (hasTurn && (!Number.isFinite(turnRange.start) || !Number.isFinite(turnRange.end)
+      || turnRange.start < walkingRange.start || turnRange.end > walkingRange.end || turnRange.end <= turnRange.start));
 
   return (
     <div className="mb-6 rounded-lg border border-zinc-600 bg-zinc-700">
@@ -208,7 +231,7 @@ const GaitSegmentsPanel = ({
         <div className="border-t border-zinc-600 p-3">
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-zinc-200">
             <span>Cached gait range: {cacheStart.toFixed(3)}–{cacheEnd.toFixed(3)} s</span>
-            <span>Hover for exact time; click to seek the video</span>
+            <span>Drag colored edges to adjust times; click to seek</span>
           </div>
           <div ref={waveformRef} className="overflow-x-auto rounded bg-zinc-800" />
           <div className="mt-2 flex flex-wrap gap-4 text-xs">
@@ -216,8 +239,13 @@ const GaitSegmentsPanel = ({
             <span><i className="mr-1 inline-block h-3 w-3 bg-red-500/70" />Turn</span>
             <span><i className="mr-1 inline-block h-3 w-3 bg-green-500/70" />Walking segment 2</span>
           </div>
-          <div className="mt-3 flex flex-wrap items-end gap-3 text-sm">
-            <label className="flex items-center gap-2">
+          <div className="mt-3 space-y-3 text-sm">
+            <div className="flex items-center gap-3 overflow-x-auto" aria-label="Walking boundaries">
+            <label className="flex shrink-0 items-center whitespace-nowrap">Walking start <input aria-label="Walking start" className="ml-1 w-24 rounded border border-zinc-500 bg-zinc-800 p-1" type="number" step="0.001" min={cacheStart} max={hasTurn ? turnRange.start : walkingRange.end} value={Number.isFinite(walkingRange.start) ? walkingRange.start : ''} onChange={e => setWalkingRange({ ...walkingRange, start: e.target.value === '' ? NaN : Number(e.target.value) })} /></label>
+            <label className="flex shrink-0 items-center whitespace-nowrap">Walking end <input aria-label="Walking end" className="ml-1 w-24 rounded border border-zinc-500 bg-zinc-800 p-1" type="number" step="0.001" min={hasTurn ? turnRange.end : walkingRange.start} max={cacheEnd} value={Number.isFinite(walkingRange.end) ? walkingRange.end : ''} onChange={e => setWalkingRange({ ...walkingRange, end: e.target.value === '' ? NaN : Number(e.target.value) })} /></label>
+            </div>
+            <div className="flex items-center gap-3 overflow-x-auto" aria-label="Turning boundaries">
+            <label className="flex shrink-0 items-center gap-2 whitespace-nowrap">
               <input
                 type="checkbox"
                 checked={hasTurn}
@@ -234,9 +262,10 @@ const GaitSegmentsPanel = ({
               Turn present
             </label>
             {hasTurn && <>
-              <label>Turn start <input className="ml-1 w-24 rounded border border-zinc-500 bg-zinc-800 p-1" type="number" step="0.001" min={cacheStart} max={turnRange.end} value={turnRange.start} onChange={event => updateBoundary('start', event.target.value)} /></label>
-              <label>Turn end <input className="ml-1 w-24 rounded border border-zinc-500 bg-zinc-800 p-1" type="number" step="0.001" min={turnRange.start} max={cacheEnd} value={turnRange.end} onChange={event => updateBoundary('end', event.target.value)} /></label>
+              <label className="flex shrink-0 items-center whitespace-nowrap">Turn start <input className="ml-1 w-24 rounded border border-zinc-500 bg-zinc-800 p-1" type="number" step="0.001" min={walkingRange.start} max={turnRange.end} value={turnRange.start} onChange={event => updateBoundary('start', event.target.value)} /></label>
+              <label className="flex shrink-0 items-center whitespace-nowrap">Turn end <input className="ml-1 w-24 rounded border border-zinc-500 bg-zinc-800 p-1" type="number" step="0.001" min={turnRange.start} max={walkingRange.end} value={turnRange.end} onChange={event => updateBoundary('end', event.target.value)} /></label>
             </>}
+            </div>
             <button
               type="button"
               className="rounded bg-[#1976d2] px-3 py-1 hover:bg-[#1565c0] disabled:cursor-not-allowed disabled:opacity-50"
@@ -246,6 +275,7 @@ const GaitSegmentsPanel = ({
               {applying ? 'Recalculating…' : 'Apply from cached gait landmarks'}
             </button>
           </div>
+          {invalidRange && <div role="alert" className="mt-2 text-sm text-red-400">Choose a valid walking range within the cached data, with the turn inside it.</div>}
           {!cache && <div className="mt-2 text-sm text-amber-300">This older JSON can display its detected segments, but it does not contain the cached gait data required to edit them.</div>}
           {error && <div className="mt-2 text-sm text-red-400">{error}</div>}
         </div>

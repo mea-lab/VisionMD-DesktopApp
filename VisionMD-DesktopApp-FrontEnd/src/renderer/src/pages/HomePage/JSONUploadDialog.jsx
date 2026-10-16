@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
@@ -11,8 +12,17 @@ const JSONUploadDialog = ({
   dialogOpen,
   setDialogOpen,
   uploadError,
+  uploadStatus,
   setUploadError,
 }) => {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!dialogOpen) return;
+    const start = Date.now();
+    setElapsed(0);
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [dialogOpen]);
   const { theme } = useTheme();
   const isLight = theme === 'light';
 
@@ -53,7 +63,8 @@ const JSONUploadDialog = ({
             </div>
           ) : (
             <div className='flex flex-col w-full h-full justify-center items-center gap-5 text-gray-100'>
-              <div>Video upload in progress</div>
+              <div role="status" aria-live="polite">{uploadStatus || 'Video upload in progress'}</div>
+              <Typography variant="body2">Elapsed: {Math.floor(elapsed / 60)}m {elapsed % 60}s</Typography>
               <CircularProgress className='my-8' size={80} />
             </div>
           )

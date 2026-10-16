@@ -7,6 +7,7 @@ import TouchApp from '@mui/icons-material/TouchApp';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import HelpOutlineIcon from '@mui/icons-material/HelpOutline';
 import Tooltip from '@mui/material/Tooltip';
+import { HeightInput } from '../../../components/ParticipantHeight';
 
 
 const Gait = ({
@@ -422,24 +423,10 @@ const Gait = ({
                   </button>
                 </div>
 
-                <div className="flex items-center space-x-1">
-                  <label className="inline text-gray-100 whitespace-nowrap">
-                    Height (cm):
-                  </label>
-
-                  <input
-                    className="p-1 pl-2 py-1.5 w-20 text-left text-gray-100 border border-zinc-500 rounded-lg bg-transparent"
-                    type="number"
-                    inputMode="decimal"
-                    step="any"
-                    onChange={(e) => {
-                      const v = e.target.value === '' ? null : parseFloat(e.target.value);
-                      setTaskGlobals({ height: v });
-                      onFieldChange(v, 'height', task);
-                    }}
-                    value={h ?? ''}
-                  />
-                </div>
+                <HeightInput value={h} onChange={value => {
+                  setTaskGlobals({ height: value });
+                  onFieldChange(value, 'height', task);
+                }} />
               </div>
             </>
           )}

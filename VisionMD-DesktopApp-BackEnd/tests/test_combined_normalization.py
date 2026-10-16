@@ -107,8 +107,8 @@ def test_failed_verification_preserves_source(tmp_path, monkeypatch):
     generate(source, '-frames:v', '30', '-c:v', 'libx264')
     original_hash = hashlib.sha256(source.read_bytes()).hexdigest()
     probe = module._normalization_probe
-    def bad_probe(path):
-        result = probe(path)
+    def bad_probe(path, **kwargs):
+        result = probe(path, **kwargs)
         if Path(path).name.startswith('visionmd-normalize-'):
             result['frame_count'] -= 1
         return result
@@ -157,3 +157,44 @@ def test_retiming_preserves_every_frame_identity(tmp_path, monkeypatch, strip_fp
     import numpy as np
     np.testing.assert_allclose(after, before, atol=1)
     assert result['frame_count'] == 60
+
+
+@pytest.mark.parametrize('extension', ['mp4', 'mov'])
+@pytest.mark.parametrize('offset', [0, 0.2])
+def test_upload_preserves_cfr_original(tmp_path, monkeypatch, extension, offset):
+    source = tmp_path / f'original.{extension}'
+    generate(source, '-frames:v', '45', '-vf', f'setpts=PTS+{offset}/TB',
+             '-c:v', 'libx264', '-pix_fmt', 'yuv420p')
+    before = source.read_bytes()
+    messages = []
+    commands = recording_commands(monkeypatch)
+    result = normalize_video(str(source), preserve_cfr=True, progress=messages.append)
+    assert result['path'] == str(source)
+    assert result['frame_count'] == 45
+    assert source.read_bytes() == before
+    assert not any(c[0] == get_ffmpeg_path() for c in commands)
+    assert any('Constant frame rate confirmed' in m for m in messages)
+
+
+def test_timestamp_detection_overrides_nominal_rate_fields(tmp_path, monkeypatch):
+    source = tmp_path / 'cfr.mp4'
+    generate(source, '-frames:v', '45', '-c:v', 'libx264')
+    original = module.subprocess.run
+    def misleading_rates(cmd, *args, **kwargs):
+        result = original(cmd, *args, **kwargs)
+        if '-show_frames' in cmd:
+            import json
+            data = json.loads(result.stdout)
+            data['streams'][0]['r_frame_rate'] = '60/1'
+            data['streams'][0]['avg_frame_rate'] = '30/1'
+            result.stdout = json.dumps(data)
+        return result
+    monkeypatch.setattr(module.subprocess, 'run', misleading_rates)
+    assert module._normalization_probe(str(source), inspect_timestamps=True)['is_cfr']
+
+
+def test_variable_timestamps_are_not_mistaken_for_cfr(tmp_path):
+    source = tmp_path / 'vfr.mp4'
+    generate(source, '-frames:v', '45', '-vf', 'setpts=PTS+0.2/TB*gte(N\\,20)',
+             '-fps_mode', 'passthrough', '-c:v', 'libx264')
+    assert not module._normalization_probe(str(source), inspect_timestamps=True)['is_cfr']

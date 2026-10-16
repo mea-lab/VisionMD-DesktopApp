@@ -1,4 +1,5 @@
 //src/pages/TaskSelection/index.jsx
+import { useRequiredGaitHeight, isGait, validHeight } from '../../components/ParticipantHeight';
 import { initializeTaskBox, patchTask } from './taskBoundingBox';
 import VideoPlayer from '../../components/VideoPlayer/VideoPlayer';
 import HeaderSection from './HeaderSection';
@@ -62,12 +63,16 @@ const TaskSelection = () => {
     setTasks([]);
   };
 
-  const moveToNextScreen = () => {
+  const { ensureHeight, heightDialog } = useRequiredGaitHeight(tasks, setTasks);
+  const moveToNextScreen = async () => {
+    const missing = tasks.find(task => isGait(task) && !validHeight(task.height));
+    if (missing && !(await ensureHeight(missing))) return;
     navigate("/taskdetails");
   };
 
   return (
     <div className="flex flex-col h-screen">
+      {heightDialog}
       <div className="flex overflow-hidden">
         <div className="flex w-1/2 h-screen">
           <VideoPlayer

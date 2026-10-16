@@ -1,3 +1,24 @@
+# Upload frame-rate detection and progress
+
+Interactive uploads inspect every decoded video frame timestamp during the source
+scan. CFR detection checks monotonic timestamps and uniform spacing, allowing
+container time-base rounding; nominal r_frame_rate/avg_frame_rate equality alone
+is not sufficient. CFR uploads use the original file unchanged, including its
+container, audio, and timestamp origin. No conversion or output verification scan
+is performed for these uploads. The initial timing scan still takes time on long
+recordings.
+
+The upload dialog polls a per-upload status endpoint once per second and shows
+elapsed time. Stages cover transfer, saving, timing inspection, conversion,
+verification, and project metadata creation. Status entries expire after an hour.
+The desktop server uses one process with multiple threads, so progress can be
+read while the upload request runs. A multi-process deployment would require a
+shared Django cache. Stage messages are not a percentage or an ETA.
+
+Variable frame rate uploads retain the single-pass conversion and verification
+below. Batch callers retain format/audio normalization unless preserve_cfr=True
+is explicitly supplied.
+
 # Single-pass video normalization
 
 Uploads and batch analysis share `normalize_video` in `app/views/upload_video.py`.

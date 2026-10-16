@@ -60,7 +60,9 @@ def get_bounding_boxes(request):
         print("Analysis started")
         start_time = time.time()
 
-        rotation = get_rotation(video_path)
+        # Upload metadata records the rotation still needed after OpenCV
+        # autorotation, rather than the container's original display matrix.
+        rotation = metadata_dict['rotation'] if 'rotation' in metadata_dict else get_rotation(video_path)
 
         # 1) Build path to YOLO model
         current_dir = os.path.dirname(__file__)
