@@ -24,6 +24,7 @@ from app.analysis.signal_analyzers.gait_step_width import (
 from app.analysis.signal_analyzers.gait_segment_variability import combine_segment_variability
 from app.analysis.signal_analyzers.gait_reporting import public_features, diagnostic_features
 from app.analysis.signal_analyzers.gait_spatial_calibration import height_spatial_calibration
+from app.analysis.gait_visibility import restrict_walking_ranges
 from app.analysis.torch_device import run_with_device_fallback
 
 
@@ -75,6 +76,7 @@ class GaitTask(BaseTask):
 
             self.focal_length = None
             self.height_cm = None
+            self.full_person_visibility = None
 
             self.original_bounding_box = None
             self.enlarged_bounding_box = None
@@ -114,14 +116,18 @@ class GaitTask(BaseTask):
             self._check_cancelled()
             self._progress(90, "Calculating gait measures…")
             signal_analyzer = self.get_signal_analyzer()
-            spatial_calibration = height_spatial_calibration(
-                landmarks['poses3d'], self.height_cm
-            )
+            calibration_poses = landmarks['poses3d']
+            if self.full_person_visibility is not None:
+                ranges = restrict_walking_ranges([(0, len(calibration_poses))], self.full_person_visibility, len(calibration_poses))
+                if not ranges:
+                    raise ValueError("No frames show the full person (head and both feet).")
+                calibration_poses = np.concatenate([calibration_poses[a:b] for a,b in ranges])
+            spatial_calibration = height_spatial_calibration(calibration_poses, self.height_cm)
             # Use the anatomical labels exactly as MeTRAbs produced them for
             # orientation.  The continuity-based left/right correction used by
             # gait inference can intentionally swap labels as a person turns and
             # would otherwise hide a real 180-degree body rotation.
-            turning_metadata = self.detect_turn(landmarks['poses3d_orientation'])
+            turning_metadata = self.detect_visible_turn(landmarks['poses3d_orientation'])
             analysis = self.analyze_straight_walking_segments(
                 signal_analyzer,
                 phases,
@@ -182,6 +188,7 @@ class GaitTask(BaseTask):
                 'phases_mirrored': phases_mirrored.tolist(),
                 'strides_mirrored': strides_mirrored.tolist(),
                 'spatial_calibration': spatial_calibration,
+                'full_person_visibility': self.full_person_visibility,
             }
         except Exception as e:
             traceback.print_exc()
@@ -193,8 +200,30 @@ class GaitTask(BaseTask):
 
         return response
 
-    def detect_turn(self, poses_3d, minimum_turn_degrees=75.0):
-        """Confirm a dominant camera-depth reversal and local body turn.
+    def detect_visible_turn(self, poses_3d):
+        """Ignore partial-person lead-in/out when selecting the dominant turn."""
+        ranges = restrict_walking_ranges([(0, len(poses_3d))], self.full_person_visibility, len(poses_3d))
+        if not ranges:
+            raise ValueError("No frames show the full person (head and both feet).")
+        start, end = ranges[0][0], ranges[-1][1]
+        heights = None
+        if self.subject_bounding_boxes:
+            mapping = {item["frameNumber"]: item["data"][0]["height"]
+                       for item in self.subject_bounding_boxes if item.get("data")}
+            values = [mapping.get(self.start_frame_idx + i, np.nan)
+                      for i in range(len(poses_3d))]
+            if np.all(np.isfinite(values)):
+                heights = np.asarray(values, dtype=float)[start:end]
+        metadata = self.detect_turn(poses_3d[start:end], box_heights=heights)
+        if metadata["is_turning"]:
+            result = self.measure_turn_range(poses_3d, start + metadata["start_frame"], start + metadata["end_frame"])
+            for key in ("boundary_source", "candidate_count", "transition_guard_seconds", "tracking_size_checked"):
+                result[key] = metadata[key]
+            return result
+        return metadata
+
+    def detect_turn(self, poses_3d, minimum_turn_degrees=75.0, box_heights=None):
+        """Confirm a dominant orientation transition and external depth reversal.
 
         Both near and far turns require sustained opposing depth trends and a
         local orientation change. Straight walks and ambiguous candidates do
@@ -225,15 +254,18 @@ class GaitTask(BaseTask):
         from app.analysis.signal_analyzers.gait_turn_detection import confirmed_turn_intervals
         pelvis_index = int(np.where(self._metrabs_joint_order == "pelv")[0][0])
         candidates = confirmed_turn_intervals(
-            poses[:, pelvis_index, 2], yaw, self.fps, minimum_turn_degrees
+            poses[:, pelvis_index, 2], yaw, self.fps, minimum_turn_degrees, box_heights=box_heights
         )
         if not candidates:
             return empty
         # The existing result schema describes one dominant turn.
         start, end, center, reversal = max(candidates, key=lambda item: item[3])
         result = self.measure_turn_range(poses, start, end)
-        result["boundary_source"] = "Local orientation crossing with sustained pelvis-depth reversal"
-        result["depth_reversal_time_seconds"] = float(self.start_time + center / self.fps)
+        result["boundary_source"] = "Orientation transition, external depth reversal, merged candidates and 1s transition guard"
+        result["candidate_count"] = len(candidates)
+        result["transition_guard_seconds"] = 1.0
+        result["tracking_size_checked"] = box_heights is not None
+        result["orientation_midpoint_time_seconds"] = float(self.start_time + center / self.fps)
         return result
 
     def _body_yaw(self, poses_3d):
@@ -327,6 +359,9 @@ class GaitTask(BaseTask):
             first, stop = walking_range
             candidate_ranges = [(max(a, first), min(b, stop)) for a, b in candidate_ranges
                                 if min(b, stop) > max(a, first)]
+        candidate_ranges = restrict_walking_ranges(
+            candidate_ranges, self.full_person_visibility, frame_count
+        )
 
         original_samples, mirrored_samples = [], []
         original_steady_steps, mirrored_steady_steps = [], []
@@ -427,6 +462,7 @@ class GaitTask(BaseTask):
             "segment_metrics": segment_metrics,
             "quality": {
                 "turn_excluded_from_primary_results": bool(turning_metadata["is_turning"]),
+                "full_person_visibility": self.full_person_visibility,
                 "pooling_method": "all valid straight-walking events",
                 "spatial_calibration": spatial_calibration,
                 "steady_step_gait": {
@@ -556,6 +592,7 @@ class GaitTask(BaseTask):
             start_frame_idx = 0
             # The video reader treats this index as inclusive.
             end_frame_idx = decoded_frame_count - 1
+        self.full_person_visibility = json_data.get("full_person_visibility")
         original_bounding_box = json_data['boundingBox']
         subject_bounding_boxes = [box for box in json_data['subject_bounding_boxes'] if start_frame_idx <= box['frameNumber'] <= end_frame_idx]
         new_x = int(max(0, original_bounding_box['x'] - original_bounding_box['width'] * 0.125))

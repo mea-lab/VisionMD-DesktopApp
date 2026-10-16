@@ -85,3 +85,34 @@ every gait/tremor channel; a Good label does not guarantee correctness.
 Verification: `python -m pytest tests/test_batch_exports.py tests/test_analysis_infrastructure.py -q`
 tests empty/flat/invalid/normal signals, P/S evidence, feature CSVs and PNGs
 for ordinary, gait, and tremor result schemas without loading models.
+
+## Full-person eligibility for gait
+
+Gait localization uses pose weights (for example `yolo11n-pose.pt`) and evaluates
+every decoded frame, independently of `--sample-fps`. Walking requires a visible
+head landmark and both ankle landmarks above 0.25 confidence, a body box inside
+the frame, and edge clearance for the top of the head and shoes. Missing or
+uncertain detections are excluded; eligibility is never interpolated. Dynamic
+subject boxes follow the detected walker as their image size changes.
+
+Only continuous eligible portions of straight walking contribute gait events.
+Turns and ineligible frames cannot bridge two walking segments. Short intervals
+or intervals without enough events are skipped; no usable segment fails the
+analysis rather than using partial-person frames. Spatial height calibration
+uses only eligible poses. The result's `gait_quality.full_person_visibility` and
+cache retain eligible/excluded counts and half-open frame intervals. Editing a
+turn interval retains the visibility restriction. This is a conservative
+automatic screen, so low-resolution or occluded recordings may lose coverage.
+
+
+### Gait turn confirmation
+
+Automatic turn detection starts with a body-orientation transition and confirms
+opposing pelvis-depth trends before and after the rotation, excluding unstable
+3D depth during the rotation itself. Dynamic tracked-person height can veto a
+candidate when the person continues approaching or receding on both sides;
+fixed user-drawn ROIs provide no such evidence. Nearby candidates are merged.
+The returned gait exclusion interval includes a one-second transition guard on
+both sides, so its duration is a guarded interval rather than exact turn onset
+and offset. The metadata records the boundary method, candidate count, guard,
+and whether tracking sizes were supplied. Ambiguous footage still needs review.

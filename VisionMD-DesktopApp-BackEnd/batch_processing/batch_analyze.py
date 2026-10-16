@@ -29,6 +29,7 @@ from django.conf import settings
 from django.test import RequestFactory
 from rest_framework.response import Response
 from ultralytics import YOLO
+from app.analysis.gait_visibility import full_person_visible, visible_ranges
 from app.analysis.analysis_quality import assess_analysis_quality
 from app.analysis.model_registry import reset_yolo_runtime
 from app.analysis.torch_device import preferred_device, run_with_device_fallback
@@ -89,14 +90,14 @@ def prepare_analysis_video(video, root):
     normalized=normalize_video(str(destination),add_audio=False)
     return Path(normalized["path"])
 
-def discover(video, model, sample_fps, device, imgsz, conf, min_coverage, padding):
+def discover(video, model, sample_fps, device, imgsz, conf, min_coverage, padding, gait_visibility=False):
     """Static-ROI association method from discover_person_candidates.py."""
     cap=cv2.VideoCapture(str(video))
     if not cap.isOpened(): raise FileNotFoundError(video)
     count,duration=probe_decoded_video_timing(str(video)); fps=count/duration
     width,height=int(cap.get(3)),int(cap.get(4))
     device=preferred_device(device)
-    step=max(1,round(fps/sample_fps)); diagonal=float(np.hypot(width,height)); tracks=[]; frame=sample=0
+    step=1 if gait_visibility else max(1,round(fps/sample_fps)); diagonal=float(np.hypot(width,height)); tracks=[]; frame=sample=0
     while True:
         ok,image=cap.read()
         if not ok: break
@@ -109,11 +110,11 @@ def discover(video, model, sample_fps, device, imgsz, conf, min_coverage, paddin
             on_cpu_fallback=lambda: reset_yolo_runtime(model))
         boxes=result.boxes.xyxy.cpu().numpy() if result.boxes else np.empty((0,4)); scores=result.boxes.conf.cpu().numpy() if result.boxes else []
         keypoints=result.keypoints.data.cpu().numpy() if result.keypoints is not None else []
-        detections=[{"box":box.tolist(),"confidence":float(scores[i]),"keypoints":keypoints[i] if len(keypoints) else None,"sample":sample} for i,box in enumerate(boxes)]
+        detections=[{"box":box.tolist(),"confidence":float(scores[i]),"keypoints":keypoints[i] if len(keypoints) else None,"sample":sample,"frame":frame} for i,box in enumerate(boxes)]
         pairs=[]
         for ti,track in enumerate(tracks):
             prior=track["observations"][-1]
-            if sample-prior["sample"]<=3:
+            if sample-prior["sample"] <= (max(3, round(.5*fps)) if gait_visibility else 3):
                 for di,det in enumerate(detections):
                     overlap,distance=iou(prior,det),centre_distance(prior,det,diagonal); pose=pose_distance(prior,det,diagonal)
                     if overlap>=.03 or distance<.16: pairs.append((.55*overlap+.25*max(0,1-3*distance)+.20*max(0,1-3*pose),ti,di))
@@ -132,7 +133,20 @@ def discover(video, model, sample_fps, device, imgsz, conf, min_coverage, paddin
     candidates=[]
     for n,track in enumerate(tracks,1):
         coverage=len(track["observations"])/max(1,sample)
-        if coverage>=min_coverage: candidates.append({"candidate_id":f"candidate_{n:03d}","bbox_xyxy":static_box(track["observations"],width,height,padding),"coverage":round(coverage,4),"mean_confidence":round(float(np.mean([x["confidence"] for x in track["observations"]])),4)})
+        if coverage < min_coverage:
+            continue
+        candidate={"candidate_id":f"candidate_{n:03d}","bbox_xyxy":static_box(track["observations"],width,height,padding),"coverage":round(coverage,4),"mean_confidence":round(float(np.mean([x["confidence"] for x in track["observations"]])),4)}
+        if gait_visibility:
+            observations=track["observations"]
+            observed_frames=np.array([o["frame"] for o in observations])
+            boxes=np.asarray([o["box"] for o in observations])
+            dense=np.column_stack([np.interp(np.arange(count),observed_frames,boxes[:,j]) for j in range(4)])
+            candidate["subject_bounding_boxes"]=[{"frameNumber":i,"data":[{"id":candidate["candidate_id"],"x":float(box[0]),"y":float(box[1]),"width":float(box[2]-box[0]),"height":float(box[3]-box[1]),"Subject":True}]} for i,box in enumerate(dense)]
+            eligible=np.zeros(count,dtype=bool)
+            for observation in observations:
+                eligible[observation["frame"]]=full_person_visible(observation["keypoints"],observation["box"],width,height)
+            candidate["full_person_visibility"]={"version":"gait-full-person-v1","method":"every decoded frame: head landmark and both ankles, confidence >0.25, body/head/shoe edge margins; missing detections excluded","frame_ranges":visible_ranges(eligible),"eligible_frame_count":int(eligible.sum()),"excluded_frame_count":int(count-eligible.sum()),"frame_count":count}
+        candidates.append(candidate)
     return {"fps":fps,"width":width,"height":height,"frame_count":count,
             "duration":duration,"rotation":get_rotation(str(video)),
             "candidates":candidates}
@@ -157,7 +171,14 @@ def analyze(video, info, candidate, key, height_cm, norm_strategy, root):
     data={"boundingBox":{"x":x1,"y":y1,"width":x2-x1,"height":y2-y1},"task_name":TASKS[key],"start_time":0.,"end_time":duration,"norm_strategy":norm_strategy}
     if key=="gait":
         if height_cm is None: raise ValueError("--height-cm is required for gait")
-        data.update({"id":candidate["candidate_id"],"height":height_cm,"subject_bounding_boxes":[{"frameNumber":i,"data":[{"id":candidate["candidate_id"],"x":x1,"y":y1,"width":x2-x1,"height":y2-y1,"Subject":True}]} for i in range(info["frame_count"])]})
+        data.update({"full_video":True,"id":candidate["candidate_id"],"height":height_cm,"subject_bounding_boxes":[{"frameNumber":i,"data":[{"id":candidate["candidate_id"],"x":x1,"y":y1,"width":x2-x1,"height":y2-y1,"Subject":True}]} for i in range(info["frame_count"])]})
+    if key=="gait":
+        if "full_person_visibility" not in candidate:
+            raise ValueError("Gait batch analysis requires head/feet visibility screening.")
+        if not candidate["full_person_visibility"].get("frame_ranges"):
+            raise ValueError("No frames show the full person (head and both feet).")
+        data["full_person_visibility"]=candidate["full_person_visibility"]
+        data["subject_bounding_boxes"]=candidate["subject_bounding_boxes"]
     request=RequestFactory().post("/",{"json_data":json.dumps(data)}); request.GET=request.GET.copy(); request.GET["id"]=video_id
     result=task_class(key)().api_response(request)
     if isinstance(result,Response): raise RuntimeError(result.data)
@@ -189,7 +210,7 @@ def project_snapshot(video, info, candidate, key, norm_strategy, result):
     x1,y1,x2,y2=candidate["bbox_xyxy"]; duration=info["duration"]
     person_id=1
     box={"id":person_id,"x":x1,"y":y1,"width":x2-x1,"height":y2-y1,"Subject":True}
-    bounding_boxes=[{"frameNumber":frame,"data":[dict(box)]} for frame in range(info["frame_count"])]
+    bounding_boxes=[{"frameNumber":item["frameNumber"],"data":[dict(person,id=person_id) for person in item["data"]]} for item in candidate["subject_bounding_boxes"]] if candidate.get("subject_bounding_boxes") else [{"frameNumber":frame,"data":[dict(box)]} for frame in range(info["frame_count"])]
     persons=[{"id":person_id,"name":"Person 1","frameNumber":0,"timestamp":"0.00","isSubject":True}]
     task={"id":1,"name":TASKS[key],"start":0.0,"end":duration,
           "x":x1,"y":y1,"box_width":x2-x1,"box_height":y2-y1,
@@ -214,13 +235,16 @@ def main():
         try:
             for video in videos:
                 analysis_video=prepare_analysis_video(video,Path(temporary))
-                info=discover(analysis_video,model,args.sample_fps,args.device,args.imgsz,args.conf,args.min_coverage,args.padding); entries=[]
+                info=discover(analysis_video,model,args.sample_fps,args.device,args.imgsz,args.conf,args.min_coverage,args.padding,args.task=="gait"); entries=[]
                 for candidate in info["candidates"]:
                     entry={}
                     try:
                         result=analyze(analysis_video,info,candidate,args.task,args.height_cm,norm_strategy,Path(temporary))
                         result["analysisQuality"]=assess_analysis_quality(result)
                         score,metrics=quality(result)
+                        if args.task=="gait":
+                            score=float(sum(segment.get("step_count",0) for segment in result.get("segment_metrics",[])))
+                            metrics["full_person_visible_frames"]=candidate["full_person_visibility"]["eligible_frame_count"]
                         entry.update(candidate=candidate,result=result,status="accepted",
                                      quality_score=score,quality=metrics)
                     except Exception as exc: entry.update(status="discarded",reason=str(exc))

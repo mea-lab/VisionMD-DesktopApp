@@ -54,6 +54,7 @@ def update_gait_segments(request):
         task.fps = fps
         task.start_time = start_time
         task.start_frame_idx = start_frame_idx
+        task.full_person_visibility = cache.get("full_person_visibility")
         spatial_calibration = cache.get("spatial_calibration")
 
         selected = payload.get("turning_segment") or {}

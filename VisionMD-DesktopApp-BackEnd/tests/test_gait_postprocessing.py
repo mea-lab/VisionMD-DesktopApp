@@ -342,8 +342,9 @@ def test_boundary_step_filter_discards_outer_steps_when_possible():
     assert np.array_equal(filtered["right_up"], events["right_up"])
 
 
+@pytest.mark.parametrize("visibility_ranges", [None, [[15,175]]])
 @pytest.mark.parametrize("walking_range", [None, {"start": 1.0, "end": 5.0}])
-def test_gait_segment_endpoint_reuses_cached_model_outputs(monkeypatch, walking_range):
+def test_gait_segment_endpoint_reuses_cached_model_outputs(monkeypatch, visibility_ranges, walking_range):
     class StubAnalyzer:
         @staticmethod
         def analyze(
@@ -395,6 +396,8 @@ def test_gait_segment_endpoint_reuses_cached_model_outputs(monkeypatch, walking_
         "strides_mirrored": np.zeros((frame_count, 9)).tolist(),
         "spatial_calibration": {"version": "test", "scale_factor": 0.8},
     }
+    if visibility_ranges is not None:
+        cache["full_person_visibility"]={"frame_ranges":visibility_ranges}
     payload = {
         "task_data": {"File name": "gait.mp4", "gait_analysis_cache": cache},
         "turning_segment": {
@@ -427,6 +430,9 @@ def test_gait_segment_endpoint_reuses_cached_model_outputs(monkeypatch, walking_
     if walking_range is not None:
         assert response.data['walking_range'] == walking_range
         assert [(s['start_frame'], s['end_frame']) for s in response.data['segment_metrics']] == [(30,59),(121,150)]
+    elif visibility_ranges is not None:
+        assert [(s["start_frame"],s["end_frame"]) for s in response.data["segment_metrics"]]==[(15,59),(121,174)]
+        assert response.data["gait_quality"]["full_person_visibility"]==cache["full_person_visibility"]
 
 
 def test_turn_p95_speed_resists_one_frame_orientation_spike():
