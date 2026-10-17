@@ -20,6 +20,8 @@ const VideoPlayer = ({
   setTasks,
   editTaskBoundingBox = false,
 }) => {
+  const [playbackError, setPlaybackError] = useState('');
+  useEffect(() => { setPlaybackError(''); }, [videoURL]);
   const [isPlaying, setIsPlaying] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
@@ -244,6 +246,7 @@ const VideoPlayer = ({
           )}
           {/* End Header Section */}
 
+          {playbackError && <div role="alert" className="bg-red-950 p-3 text-white">{playbackError}</div>}
           <div className="flex flex-row justify-evenly overflow-hidden relative py-2">
           <div className="flex flex-col w-[10vw]"></div>
           <div
@@ -268,7 +271,14 @@ const VideoPlayer = ({
                   transform: `scale(${zoomLevel}) translate(${panOffset.x / zoomLevel}px, ${panOffset.y / zoomLevel}px)`,
                   transformOrigin: 'center center',
                 }}
+                onError={() => setPlaybackError('The browser could not decode this video. Re-import it to prepare a compatible playback file.')}
                 onLoadedMetadata={() => {
+                  if (!videoRef.current.videoWidth || !videoRef.current.videoHeight) {
+                    setPlaybackError('Audio loaded, but the browser could not decode video frames. Re-import this video to prepare a compatible playback file.');
+                    setVideoReady(false);
+                    return;
+                  }
+                  setPlaybackError('');
                   setVideoReady(true);
                   captureTotalFrameCount();
                   updateContainerSize();

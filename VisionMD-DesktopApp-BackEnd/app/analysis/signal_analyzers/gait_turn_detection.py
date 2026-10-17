@@ -1,7 +1,7 @@
 """Confirm orientation transitions using movement outside the rotation.
 
-Depth is in millimetres. Returned intervals are inclusive and include a
-one-second guard on either side to exclude transition steps from steady gait.
+Depth is in millimetres. Returned intervals are inclusive orientation-transition
+estimates, without a hidden time margin. Turns from standing are valid.
 """
 import numpy as np
 from scipy.ndimage import median_filter
@@ -50,8 +50,8 @@ def confirmed_turn_intervals(depth, yaw, fps, minimum_turn_degrees=75.0,
         if not len(middle):
             continue
         m = int(middle[0])
-        starts = np.flatnonzero(progress[:m] <= .05 * abs(delta))
-        ends = np.flatnonzero(progress[m + 1:] >= .95 * abs(delta))
+        starts = np.flatnonzero(progress[:m] <= .10 * abs(delta))
+        ends = np.flatnonzero(progress[m + 1:] >= .90 * abs(delta))
         if not len(starts) or not len(ends):
             continue
         start = a + int(starts[-1])
@@ -67,27 +67,29 @@ def confirmed_turn_intervals(depth, yaw, fps, minimum_turn_degrees=75.0,
             continue
         left_change = np.median(before[-plateau:]) - np.median(before[:plateau])
         right_change = np.median(after[-plateau:]) - np.median(after[:plateau])
+        strength = 0.0
         for sign in (1, -1):
-            if sign * left_change < excursion or sign * right_change > -excursion:
+            if (sign * left_change >= excursion and sign * right_change <= -excursion
+                    and np.mean(sign * np.diff(before) >= -noise) >= .7
+                    and np.mean(sign * np.diff(after) <= noise) >= .7):
+                strength = max(strength, min(sign * left_change, -sign * right_change))
+        # Turning in place or initiating/finishing a walk is still turning.
+        # Require a substantial, sustained orientation change; continued travel
+        # in the same direction on both sides remains evidence against a turn.
+        stationary_limit = max(100.0, 4 * noise)
+        stationary_side = min(abs(left_change), abs(right_change)) <= stationary_limit
+        if not strength and not stationary_side:
+            continue
+        if sizes is not None and not stationary_side:
+            size_before = sizes[before_start:start]
+            size_after = sizes[end + 1:after_end]
+            size_left = np.median(size_before[-plateau:]) - np.median(size_before[:plateau])
+            size_right = np.median(size_after[-plateau:]) - np.median(size_after[:plateau])
+            threshold = .02 * np.median(sizes[start:end + 1])
+            if ((size_left > threshold and size_right > threshold) or
+                    (size_left < -threshold and size_right < -threshold)):
                 continue
-            if (np.mean(sign * np.diff(before) >= -noise) < .7 or
-                    np.mean(sign * np.diff(after) <= noise) < .7):
-                continue
-            if sizes is not None:
-                size_before = sizes[before_start:start]
-                size_after = sizes[end + 1:after_end]
-                size_left = (np.median(size_before[-plateau:]) -
-                             np.median(size_before[:plateau]))
-                size_right = (np.median(size_after[-plateau:]) -
-                              np.median(size_after[:plateau]))
-                threshold = .02 * np.median(sizes[start:end + 1])
-                # Sustained size change in the same direction on both sides
-                # contradicts a turnaround. Small changes are inconclusive.
-                if ((size_left > threshold and size_right > threshold) or
-                        (size_left < -threshold and size_right < -threshold)):
-                    continue
-            candidates.append((start, end, a + m,
-                               min(sign * left_change, -sign * right_change)))
+        candidates.append((start, end, a + m, max(strength, abs(float(delta)))))
 
     # Adjacent windows can describe different parts of the same rotation.
     merged = []
@@ -99,6 +101,4 @@ def confirmed_turn_intervals(depth, yaw, fps, minimum_turn_degrees=75.0,
                            max(previous[3], strength)))
         else:
             merged.append((start, end, center, strength))
-    guard = max(1, int(round(fps)))
-    return [(max(0, start - guard), min(len(depth) - 1, end + guard), center, strength)
-            for start, end, center, strength in merged]
+    return merged

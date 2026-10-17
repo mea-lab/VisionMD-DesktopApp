@@ -107,12 +107,13 @@ automatic screen, so low-resolution or occluded recordings may lose coverage.
 
 ### Gait turn confirmation
 
-Automatic turn detection starts with a body-orientation transition and confirms
-opposing pelvis-depth trends before and after the rotation, excluding unstable
-3D depth during the rotation itself. Dynamic tracked-person height can veto a
-candidate when the person continues approaching or receding on both sides;
-fixed user-drawn ROIs provide no such evidence. Nearby candidates are merged.
-The returned gait exclusion interval includes a one-second transition guard on
-both sides, so its duration is a guarded interval rather than exact turn onset
-and offset. The metadata records the boundary method, candidate count, guard,
-and whether tracking sizes were supplied. Ambiguous footage still needs review.
+Automatic turn detection identifies sustained body-orientation transitions and
+checks surrounding movement consistency. A substantial rotation from standing
+or in place can qualify without a preceding walking-direction reversal. Continued
+translation in the same direction on both sides still contradicts a turnaround.
+Nearby candidate windows are merged, and all separate confirmed turns are retained.
+Returned boundaries estimate the orientation transition; no hidden one-second
+padding is added. Each turn is excluded independently from walking measurements.
+The editor supports adding/removing turns, changing their shared walking edges,
+and redetecting turns from cached poses without rerunning landmark estimation.
+Boundary estimates can be wrong in noisy or occluded footage and need review.

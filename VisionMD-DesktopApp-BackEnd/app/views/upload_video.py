@@ -523,6 +523,14 @@ def _supports_strip_fps(ffmpeg_path):
     return result.returncode == 0 and 'strip_fps' in result.stdout
 
 
+@lru_cache(maxsize=4)
+def _supports_fps_mode(ffmpeg_path):
+    result = subprocess.run([ffmpeg_path, '-hide_banner', '-h', 'full'],
+                            capture_output=True, text=True,
+                            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+    return result.returncode == 0 and '-fps_mode' in result.stdout
+
+
 def _normalization_probe(input_path, inspect_timestamps=False):
     """Read normalization metadata and count frames in one decode pass."""
     cmd = [get_ffprobe_path(), '-v', 'error', '-count_frames',
@@ -562,6 +570,59 @@ def _normalization_probe(input_path, inspect_timestamps=False):
     return summary
 
 
+def _fast_cfr_probe(input_path):
+    """Prove CFR from compressed packet PTS, without decoding full frames.
+
+    Only use packet counts for codecs with one displayed frame per packet.
+    Uncertain timing, edit lists, and unsupported packet layouts fall back to
+    the decoded timing check. Matching nominal rate fields are not proof.
+    """
+    metadata = subprocess.run(
+        [get_ffprobe_path(), '-v', 'error', '-show_streams', '-show_format',
+         '-of', 'json', input_path], capture_output=True, text=True)
+    if metadata.returncode:
+        raise RuntimeError(f'FFprobe metadata check failed: {metadata.stderr}')
+    data = json.loads(metadata.stdout)
+    video = next((v for v in data.get('streams', []) if v.get('codec_type') == 'video'), None)
+    if video is None:
+        raise RuntimeError('Input has no video stream.')
+    if video.get('codec_name') not in {'h264', 'hevc', 'mpeg4', 'mjpeg'}:
+        return None
+    result = subprocess.run(
+        [get_ffprobe_path(), '-v', 'error', '-select_streams', 'v:0',
+         '-show_packets', '-show_entries', 'packet=pts_time,duration_time,flags',
+         '-of', 'json', input_path], capture_output=True, text=True)
+    if result.returncode:
+        return None
+    packets = json.loads(result.stdout).get('packets', [])
+    try:
+        if not packets or any('D' in p.get('flags', '') for p in packets):
+            return None
+        timestamps = sorted(float(p['pts_time']) for p in packets)
+        count = len(timestamps)
+        declared_count = video.get('nb_frames')
+        if declared_count not in (None, 'N/A') and int(declared_count) != count:
+            return None
+        if count < 2:
+            return None
+        step = (timestamps[-1] - timestamps[0]) / (count - 1)
+        tick = float(Fraction(video.get('time_base', '1/1000000')))
+        tolerance = max(2e-6, 1.1 * tick)
+        if step <= 0 or not all(
+                (i == 0 or t > timestamps[i - 1])
+                and abs(t - (timestamps[0] + i * step)) <= tolerance
+                for i, t in enumerate(timestamps)):
+            return None
+        duration = float(video.get('duration') or count * step)
+        if not duration > 0 or abs(duration - count * step) > max(step, tolerance):
+            return None
+    except (KeyError, ValueError, TypeError, ZeroDivisionError):
+        return None
+    audio = next((v for v in data.get('streams', []) if v.get('codec_type') == 'audio'), None)
+    return {'video': video, 'audio': audio, 'frame_count': count,
+            'duration': duration, 'first_timestamp': timestamps[0], 'is_cfr': True}
+
+
 def _square_pixel_size(video):
     width, height = int(video['width']), int(video['height'])
     def ratio(value):
@@ -590,16 +651,18 @@ def normalize_video(input_path, add_audio=True, progress=None, preserve_cfr=Fals
     pixels, while stream-copy operations retain the source display metadata.
     """
     report = progress or (lambda message: None)
-    report("Checking frame timing and counting video frames…")
-    source = _normalization_probe(input_path, inspect_timestamps=True)
+    report('Checking compressed video timestamps (no full video decode)…')
+    source = _fast_cfr_probe(input_path) if preserve_cfr else None
+    if source is None:
+        report('Inspecting decoded frame timing; packet timing was variable or inconclusive…')
+        source = _normalization_probe(input_path, inspect_timestamps=True)
     video, audio = source['video'], source['audio']
     count, duration = source['frame_count'], source['duration']
-    if preserve_cfr and source['is_cfr']:
-        report('Constant frame rate confirmed. Using the original video.')
-        return {'path': input_path, 'source_frame_count': count,
-                'source_duration': duration, 'frame_count': count, 'duration': duration}
-    first_timestamp = probe_first_video_timestamp(input_path)
-    retime = not source['is_cfr'] or abs(first_timestamp) > .001
+    first_timestamp = source.get('first_timestamp')
+    if first_timestamp is None:
+        first_timestamp = probe_first_video_timestamp(input_path)
+    # CFR input retains its cadence even when its codec/container needs changing.
+    retime = not source['is_cfr'] or (not preserve_cfr and abs(first_timestamp) > .001)
     geometry = dict(video)
     rotation = next((float(item['rotation']) for item in video.get('side_data_list', [])
                      if 'rotation' in item), float(video.get('tags', {}).get('rotate', 0)))
@@ -616,13 +679,15 @@ def normalize_video(input_path, add_audio=True, progress=None, preserve_cfr=Fals
                     or video.get('codec_name') != 'h264'
                     or video.get('pix_fmt') not in {'yuv420p', 'yuvj420p'}
                     or int(video['width']) % 2 or int(video['height']) % 2)
+    rebase_timestamps = abs(first_timestamp) > .001 and (retime or encode_video)
     encode_audio = audio is not None and (audio.get('codec_name') != 'aac'
-                                        or abs(first_timestamp) > .001)
-    dummy_audio = audio is None and add_audio
+                                        or rebase_timestamps)
+    dummy_audio = audio is None and add_audio and not (preserve_cfr and source['is_cfr'])
     base, ext = os.path.splitext(input_path)
     summary = {'path': input_path, 'source_frame_count': count,
                'source_duration': duration, 'frame_count': count, 'duration': duration}
     if not (encode_video or encode_audio or dummy_audio) and ext.lower() == '.mp4':
+        report('Constant frame rate and playback format confirmed. Using the original video.')
         return summary
 
     # Write a separate file and verify before touching the source.
@@ -650,6 +715,8 @@ def normalize_video(input_path, add_audio=True, progress=None, preserve_cfr=Fals
         strip_fps = _supports_strip_fps(cmd[0])
         pts_filter = 'setpts=N:strip_fps=1' if strip_fps else 'setpts=N'
         filters += [f'settb=expr=1/({rate})', pts_filter]
+    if not retime and encode_video and abs(first_timestamp) > .001:
+        filters += ['setpts=PTS-STARTPTS']
     if square_size is not None:
         filters += [f'scale={square_size[0]}:{square_size[1]}', 'setsar=1']
     if int(video['width']) % 2 or int(video['height']) % 2:
@@ -658,12 +725,17 @@ def normalize_video(input_path, add_audio=True, progress=None, preserve_cfr=Fals
         if filters:
             cmd += ['-vf', ','.join(filters)]
         if retime:
-            cmd += ['-enc_time_base', 'filter']
+            # Explicit rational time bases also work with the packaged FFmpeg 4.3.
+            rate_fraction = Fraction(rate).limit_denominator(1000000000)
+            cmd += ['-enc_time_base', f'{rate_fraction.denominator}/{rate_fraction.numerator}']
             if strip_fps:
                 cmd += ['-r', rate]
             # Older builds cannot clear inherited frame durations: passthrough
             # preserves each observation, rather than resampling those durations.
-        cmd += ['-fps_mode', 'cfr' if retime and strip_fps else 'passthrough', '-c:v', 'libx264',
+        sync_mode = 'cfr' if retime and strip_fps else 'passthrough'
+        cmd += (['-fps_mode', sync_mode] if _supports_fps_mode(cmd[0])
+                else ['-vsync', '1' if sync_mode == 'cfr' else '0'])
+        cmd += ['-c:v', 'libx264',
                 '-preset', 'medium', '-tune', 'grain', '-crf', '15',
                 '-pix_fmt', 'yuv420p']
     else:
@@ -672,22 +744,25 @@ def normalize_video(input_path, add_audio=True, progress=None, preserve_cfr=Fals
         cmd += ['-c:a', 'aac' if encode_audio or dummy_audio else 'copy']
         if encode_audio or dummy_audio:
             cmd += ['-b:a', '128k']
-        if encode_audio and abs(first_timestamp) > .001:
+        if encode_audio and rebase_timestamps:
             cmd += ['-af', 'asetpts=PTS-STARTPTS']
     cmd += ['-movflags', '+faststart', output]
-    report('Converting variable frame rate video… This can take several minutes.'
-           if retime else 'Preparing video format and audio…')
+    report('Converting variable frame rate video to CFR…' if retime else
+           'CFR confirmed. Converting video codec for browser playback (frame rate unchanged)…'
+           if encode_video else 'CFR confirmed. Copying video into a playback-compatible container…')
     try:
         result = subprocess.run(cmd, capture_output=True,
                                 creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
         if result.returncode:
             raise RuntimeError(f"FFmpeg normalization failed:\n{result.stderr.decode('utf-8', errors='replace')}")
         report('Verifying converted frame count and duration…')
-        normalized = _normalization_probe(output)
+        normalized = _fast_cfr_probe(output) if preserve_cfr and not encode_video else None
+        if normalized is None:
+            normalized = _normalization_probe(output)
         if normalized['frame_count'] != count:
             raise RuntimeError(f"Normalization changed decoded frames from {count} "
                                f"to {normalized['frame_count']}; source file was preserved.")
-        if abs(probe_first_video_timestamp(output)) > .001:
+        if (retime or encode_video or not preserve_cfr) and abs(probe_first_video_timestamp(output)) > .001:
             raise RuntimeError('Normalization did not produce zero-based video timestamps; source file was preserved.')
         if abs(normalized['duration'] - duration) >= duration / count:
             raise RuntimeError('Normalization changed video duration by at least one frame; source file was preserved.')
@@ -695,7 +770,7 @@ def normalize_video(input_path, add_audio=True, progress=None, preserve_cfr=Fals
             raise RuntimeError('Normalization did not produce square pixels; source file was preserved.')
         if normalized['video'].get('codec_name') != 'h264':
             raise RuntimeError('Normalization did not produce H.264 video; source file was preserved.')
-        if add_audio and (normalized['audio'] is None or normalized['audio'].get('codec_name') != 'aac'):
+        if (audio is not None or dummy_audio) and (normalized['audio'] is None or normalized['audio'].get('codec_name') != 'aac'):
             raise RuntimeError('Normalization did not produce AAC audio; source file was preserved.')
         os.replace(output, target)
         if os.path.abspath(input_path) != os.path.abspath(target):
@@ -769,17 +844,6 @@ def upload_video(request):
             raise RuntimeError("Video file was not saved to disk.")
         stem_name, extension = os.path.splitext(original_filename)
         file_type = extension.lstrip('.')
-
-        cap = cv2.VideoCapture(saved_video_path)
-        if not cap.isOpened():
-            return Response("Cannot open video file after saving.", status=400)
-        ret, frame = cap.read()
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        cap.release()
-        if not ret or frame is None:
-            raise RuntimeError("Failed to read a frame from the uploaded video.")
-        if not fps or fps <= 0:
-            raise RuntimeError(f"Invalid FPS detected: {fps}")
 
         # Capture the source's decoded video frames before any normalization.
         # This is the invariant that matters; nominal FPS and container

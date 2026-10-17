@@ -216,9 +216,15 @@ class GaitTask(BaseTask):
                 heights = np.asarray(values, dtype=float)[start:end]
         metadata = self.detect_turn(poses_3d[start:end], box_heights=heights)
         if metadata["is_turning"]:
-            result = self.measure_turn_range(poses_3d, start + metadata["start_frame"], start + metadata["end_frame"])
-            for key in ("boundary_source", "candidate_count", "transition_guard_seconds", "tracking_size_checked"):
-                result[key] = metadata[key]
+            local_turns = metadata.get('turns') or [metadata]
+            turns = [self.measure_turn_range(poses_3d, start + item['start_frame'],
+                                            start + item['end_frame']) for item in local_turns]
+            primary = max(turns, key=lambda item: abs(item.get('angle_degrees', 0)))
+            result = dict(primary)
+            for key in ('boundary_source', 'candidate_count', 'transition_guard_seconds', 'tracking_size_checked'):
+                if key in metadata:
+                    result[key] = metadata[key]
+            result['turns'] = turns
             return result
         return metadata
 
@@ -258,14 +264,15 @@ class GaitTask(BaseTask):
         )
         if not candidates:
             return empty
-        # The existing result schema describes one dominant turn.
-        start, end, center, reversal = max(candidates, key=lambda item: item[3])
-        result = self.measure_turn_range(poses, start, end)
-        result["boundary_source"] = "Orientation transition, external depth reversal, merged candidates and 1s transition guard"
-        result["candidate_count"] = len(candidates)
-        result["transition_guard_seconds"] = 1.0
-        result["tracking_size_checked"] = box_heights is not None
-        result["orientation_midpoint_time_seconds"] = float(self.start_time + center / self.fps)
+        turns = [self.measure_turn_range(poses_3d, start, end)
+                 for start, end, _, _ in candidates]
+        # Keep a primary interval for older readers, but retain every turn.
+        result = dict(max(turns, key=lambda item: abs(item['angle_degrees'])))
+        result['turns'] = turns
+        result['boundary_source'] = 'Sustained orientation transition with movement consistency; no time padding'
+        result['candidate_count'] = len(turns)
+        result['transition_guard_seconds'] = 0.0
+        result['tracking_size_checked'] = box_heights is not None
         return result
 
     def _body_yaw(self, poses_3d):
@@ -347,13 +354,17 @@ class GaitTask(BaseTask):
         if not np.isfinite(spatial_scale) or spatial_scale <= 0:
             raise ValueError("Gait spatial calibration scale must be positive and finite.")
         frame_count = len(poses)
-        if turning_metadata["is_turning"]:
-            candidate_ranges = [
-                (0, int(turning_metadata["start_frame"])),
-                (int(turning_metadata["end_frame"]) + 1, frame_count),
-            ]
-        else:
-            candidate_ranges = [(0, frame_count)]
+        candidate_ranges = []
+        cursor = 0
+        turns = (turning_metadata.get('turns') or [turning_metadata]) if turning_metadata['is_turning'] else []
+        for turn in sorted(turns, key=lambda item: item['start_frame']):
+            start = int(turn['start_frame'])
+            end = int(turn['end_frame'])
+            if start > cursor:
+                candidate_ranges.append((cursor, start))
+            cursor = max(cursor, end + 1)
+        if cursor < frame_count:
+            candidate_ranges.append((cursor, frame_count))
 
         if walking_range is not None:
             first, stop = walking_range

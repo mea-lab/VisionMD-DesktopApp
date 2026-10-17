@@ -57,27 +57,34 @@ def update_gait_segments(request):
         task.full_person_visibility = cache.get("full_person_visibility")
         spatial_calibration = cache.get("spatial_calibration")
 
-        selected = payload.get("turning_segment") or {}
-        if bool(selected.get("is_turning")):
-            selected_start = float(selected["start_time_seconds"])
-            selected_end = float(selected["end_time_seconds"])
-            cache_end = start_time + (frame_count - 1) / fps
-            if (not np.isfinite([selected_start, selected_end]).all() or selected_start < walk_start
-                    or selected_end > walk_end or selected_end <= selected_start):
-                raise ValueError(
-                    f"Turn interval must be inside {start_time:.3f}-{cache_end:.3f} seconds."
-                )
-            turn_start = int(round((selected_start - start_time) * fps))
-            turn_end = int(round((selected_end - start_time) * fps))
-            turning_metadata = task.measure_turn_range(
-                orientation_poses, turn_start, turn_end
-            )
+        if payload.get('redetect_turns'):
+            turning_metadata = task.detect_visible_turn(orientation_poses)
         else:
-            # A deliberately unreachable automatic threshold gives us the
-            # canonical no-turn metadata without duplicating its schema.
-            turning_metadata = task.detect_turn(
-                orientation_poses, minimum_turn_degrees=float("inf")
-            )
+            legacy = payload.get('turning_segment') or {}
+            selected_turns = payload.get('turning_segments')
+            if selected_turns is None:
+                selected_turns = [legacy] if legacy.get('is_turning') else []
+            measured = []
+            previous_end = walk_start
+            for selected in selected_turns:
+                selected_start = float(selected['start_time_seconds'])
+                selected_end = float(selected['end_time_seconds'])
+                if (not np.isfinite([selected_start, selected_end]).all()
+                        or selected_start < previous_end or selected_start < walk_start
+                        or selected_end > walk_end or selected_end <= selected_start):
+                    raise ValueError('Turn intervals must be ordered, non-overlapping and inside the walking range.')
+                turn_start = int(round((selected_start - start_time) * fps))
+                turn_end = int(round((selected_end - start_time) * fps))
+                if measured and turn_start <= measured[-1]['end_frame']:
+                    raise ValueError('Turn intervals overlap after rounding to video frames.')
+                measured.append(task.measure_turn_range(orientation_poses, turn_start, turn_end))
+                previous_end = selected_end
+            if measured:
+                turning_metadata = dict(max(measured, key=lambda item: abs(item['angle_degrees'])))
+                turning_metadata.update(turns=measured, candidate_count=len(measured), transition_guard_seconds=0.0)
+            else:
+                turning_metadata = task.detect_turn(orientation_poses, minimum_turn_degrees=float('inf'))
+                turning_metadata['turns'] = []
 
         analyzer = task.get_signal_analyzer()
         analysis = task.analyze_straight_walking_segments(
@@ -114,7 +121,7 @@ def update_gait_segments(request):
         output["segment_metrics"] = analysis["segment_metrics"]
         output["gait_quality"] = {
             **analysis["quality"],
-            "manual_segment_override": True,
+            "manual_segment_override": not bool(payload.get("redetect_turns")),
         }
         return Response(output)
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:

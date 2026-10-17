@@ -169,11 +169,18 @@ def test_upload_preserves_cfr_original(tmp_path, monkeypatch, extension, offset)
     messages = []
     commands = recording_commands(monkeypatch)
     result = normalize_video(str(source), preserve_cfr=True, progress=messages.append)
-    assert result['path'] == str(source)
     assert result['frame_count'] == 45
-    assert source.read_bytes() == before
-    assert not any(c[0] == get_ffmpeg_path() for c in commands)
-    assert any('Constant frame rate confirmed' in m for m in messages)
+    assert not any('-count_frames' in c or '-show_frames' in c for c in commands)
+    if extension == 'mp4':
+        assert result['path'] == str(source)
+        assert source.read_bytes() == before
+        assert not any(c[0] == get_ffmpeg_path() for c in commands)
+    else:
+        conversions = [c for c in commands if c[0] == get_ffmpeg_path() and '-i' in c]
+        assert len(conversions) == 1
+        assert conversions[0][conversions[0].index('-c:v') + 1] == 'copy'
+        assert '-vf' not in conversions[0] and '-r' not in conversions[0]
+    assert any('CFR confirmed' in m or 'Constant frame rate' in m for m in messages)
 
 
 def test_timestamp_detection_overrides_nominal_rate_fields(tmp_path, monkeypatch):
@@ -198,3 +205,72 @@ def test_variable_timestamps_are_not_mistaken_for_cfr(tmp_path):
     generate(source, '-frames:v', '45', '-vf', 'setpts=PTS+0.2/TB*gte(N\\,20)',
              '-fps_mode', 'passthrough', '-c:v', 'libx264')
     assert not module._normalization_probe(str(source), inspect_timestamps=True)['is_cfr']
+
+
+def test_cfr_unsupported_pixel_format_converts_codec_without_retiming(tmp_path, monkeypatch):
+    source = tmp_path / 'high444.mp4'
+    generate(source, '-frames:v', '45', '-c:v', 'libx264', '-pix_fmt', 'yuv444p')
+    commands = recording_commands(monkeypatch)
+    result = normalize_video(str(source), preserve_cfr=True)
+    conversions = [c for c in commands if c[0] == get_ffmpeg_path() and '-i' in c]
+    assert len(conversions) == 1
+    cmd = conversions[0]
+    assert cmd[cmd.index('-c:v') + 1] == 'libx264'
+    assert '-r' not in cmd
+    assert not any('setpts=N' in item for item in cmd)
+    assert result['frame_count'] == 45
+    assert module._normalization_probe(result['path'])['video']['pix_fmt'] == 'yuv420p'
+
+
+def test_packet_probe_detects_late_variable_timing(tmp_path):
+    source = tmp_path / 'late-vfr.mp4'
+    generate(source, '-frames:v', '300', '-vf', 'setpts=PTS+0.2/TB*gte(N\\,280)',
+             '-fps_mode', 'passthrough', '-c:v', 'libx264')
+    assert module._fast_cfr_probe(str(source)) is None
+
+
+def test_packet_probe_checks_presentation_order_for_b_frames(tmp_path):
+    source = tmp_path / 'bframes.mp4'
+    generate(source, '-frames:v', '60', '-c:v', 'libx264', '-bf', '3')
+    result = module._fast_cfr_probe(str(source))
+    assert result['is_cfr'] and result['frame_count'] == 60
+
+
+def test_compatible_cfr_with_audio_and_offset_is_untouched(tmp_path, monkeypatch):
+    source = tmp_path / 'offset-audio.mp4'
+    generate(source, '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=48000',
+             '-frames:v', '45', '-vf', 'setpts=PTS+0.2/TB',
+             '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest')
+    before = source.read_bytes()
+    commands = recording_commands(monkeypatch)
+    result = normalize_video(str(source), preserve_cfr=True)
+    assert result['path'] == str(source) and source.read_bytes() == before
+    assert not any(c[0] == get_ffmpeg_path() for c in commands)
+
+
+@pytest.mark.parametrize('retime', [False, True])
+def test_old_ffmpeg_options_preserve_frames(tmp_path, monkeypatch, retime):
+    source = tmp_path / 'legacy.mov'
+    filters = ['-vf', 'setpts=PTS+0.2/TB*gte(N\\,20)'] if retime else []
+    generate(source, '-frames:v', '45', *filters, '-fps_mode', 'passthrough',
+             '-c:v', 'libx264', '-pix_fmt', 'yuv444p')
+    monkeypatch.setattr(module, '_supports_fps_mode', lambda _: False)
+    monkeypatch.setattr(module, '_supports_strip_fps', lambda _: False)
+    native_run = module.subprocess.run
+    def execute_legacy(cmd, *args, **kwargs):
+        # This test host runs FFmpeg 9, which removed -vsync. Inspect the
+        # generated legacy command, then execute its equivalent modern spelling.
+        if '-vsync' in cmd:
+            cmd = list(cmd)
+            index = cmd.index('-vsync')
+            mode = 'passthrough' if cmd[index + 1] == '0' else 'cfr'
+            cmd[index:index + 2] = ['-fps_mode', mode]
+        return native_run(cmd, *args, **kwargs)
+    monkeypatch.setattr(module.subprocess, 'run', execute_legacy)
+    commands = recording_commands(monkeypatch)
+    result = normalize_video(str(source), preserve_cfr=True)
+    conversions = [c for c in commands if c[0] == get_ffmpeg_path() and '-i' in c]
+    assert len(conversions) == 1
+    assert '-vsync' in conversions[0] and '-fps_mode' not in conversions[0]
+    assert 'filter' not in conversions[0]
+    assert result['frame_count'] == 45

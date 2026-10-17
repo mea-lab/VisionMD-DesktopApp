@@ -476,3 +476,51 @@ def test_gait_job_rejects_missing_or_invalid_height(height):
     response = create_analysis_job(request, 'gait')
     assert response.status_code == 400
     assert 'height' in json.loads(response.content)['error']
+
+
+@pytest.mark.parametrize('overlap', [False, True])
+def test_cached_endpoint_accepts_multiple_turns_and_rejects_overlap(monkeypatch, overlap):
+    cache = {'fps': 30., 'start_time': 0., 'start_frame_idx': 0}
+    for key in ['poses3d', 'poses3d_orientation', 'poses3d_mirrored']:
+        cache[key] = np.zeros((300,17,3)).tolist()
+    for key in ['phases', 'strides', 'phases_mirrored', 'strides_mirrored']:
+        cache[key] = np.zeros((300,8)).tolist()
+    seen = []
+    empty_events = {key: np.array([]) for key in ['left_down','left_up','right_down','right_up']}
+    def analyze(self, *args, **kwargs):
+        seen.extend(args[7]['turns'])
+        return {'results': {}, 'results_mirrored': {}, 'gait_event_dic': empty_events,
+                'gait_event_dic_mirrored': empty_events, 'segment_metrics': [], 'quality': {}}
+    monkeypatch.setattr(GaitTask, '_body_yaw', lambda self, poses: np.linspace(0., np.pi, len(poses)))
+    monkeypatch.setattr(GaitTask, 'analyze_straight_walking_segments', analyze)
+    monkeypatch.setattr(GaitTask, 'get_signal_analyzer', lambda self: None)
+    monkeypatch.setattr(GaitTask, 'calculate_average_features', lambda self,*args: {})
+    monkeypatch.setattr(GaitTask, 'calculate_landmark_colors', lambda self,*args: np.zeros((300,17)))
+    payload = {'task_data': {'gait_analysis_cache': cache}, 'turning_segments': [
+        {'start_time_seconds': 2., 'end_time_seconds': 4.},
+        {'start_time_seconds': 3. if overlap else 6., 'end_time_seconds': 8.}]}
+    response = update_gait_segments(APIRequestFactory().post('/', {'json_data':json.dumps(payload)}, format='multipart'))
+    if overlap:
+        assert response.status_code == 400
+        assert not seen
+    else:
+        assert response.status_code == 200, response.data
+        assert len(response.data['turning_metadata']['turns']) == len(seen) == 2
+        assert response.data['gait_analysis_cache'] == cache
+
+
+def test_all_turn_intervals_are_excluded_from_walking(monkeypatch):
+    task = GaitTask(); task.fps = 10.; task.start_time = 0.; task.start_frame_idx = 0
+    calls = []
+    class StopAfterCapture:
+        def analyze(self, phases, strides, poses, fps, **kwargs):
+            calls.append(poses[:,0,0].tolist())
+            raise ValueError('capture only')
+    poses = np.zeros((300,17,3)); poses[:,0,0] = np.arange(300)
+    signal = np.zeros((300,8))
+    metadata = {'is_turning': True, 'turns': [{'start_frame':50,'end_frame':80}, {'start_frame':160,'end_frame':180}]}
+    try:
+        task.analyze_straight_walking_segments(StopAfterCapture(), signal,signal,poses,signal,signal,poses,metadata)
+    except ValueError:
+        pass
+    assert calls == [list(range(50)), list(range(81,160)), list(range(181,300))]
