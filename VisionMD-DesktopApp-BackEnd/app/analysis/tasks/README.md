@@ -636,3 +636,20 @@ They use the vendored WiLoR Mini implementation in
 ignored by Git. On first P/S use WiLoR downloads the official checkpoint into
 `wilor_mini/pretrained_models/`; a managed installation can instead set
 `VISIONMD_WILOR_MODEL_DIR` to a pre-populated model directory.
+
+P/S YOLO localization uses `ps-expanded-search-v1`: the participant selection
+anchors a search region padded by 25% of its width/height on each side, clipped
+only at the image boundary. Requested handedness, a participant reach envelope,
+and one-to-one temporal tracking constrain selection. This reduces bystander
+competition but cannot guarantee identity in overlapping-person scenes.
+
+Tracks retry at 50% padding when observed coverage is below 80%, an unsupported
+gap exceeds 0.5 seconds, or more than 5% of observed boxes touch an artificial
+search boundary. ROI interpolation does not count as a detection. If the wider
+search still fails, analysis stops with an actionable error before calculating
+features. These are conservative recovery thresholds, not clinical validity
+criteria. Search boxes, attempts, coverage, gaps, and clipping are recorded in
+`psPipeline.localization`. P/S cache keys include the search version so a fresh
+analysis cannot silently reuse the old tight-crop result. Existing saved task
+results remain unchanged until analyzed again. The provisional MediaPipe screen
+is unchanged; these safeguards apply to the YOLO/WiLoR path.

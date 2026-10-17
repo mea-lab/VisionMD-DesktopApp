@@ -32,6 +32,10 @@ def cache_key(video_id: str, task_name: str, json_data: str) -> str:
         parameters = json_data
     payload = {"version":CACHE_VERSION,"video":video_fingerprint,
                "task":task_name,"parameters":parameters}
+    # P/S search changes must not replay results generated with tight crops.
+    if "pronation" in task_name.lower():
+        from app.analysis.tasks._ps_hand_search import PS_SEARCH_VERSION
+        payload["ps_search_version"] = PS_SEARCH_VERSION
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str).encode()
     return hashlib.sha256(encoded).hexdigest()
 

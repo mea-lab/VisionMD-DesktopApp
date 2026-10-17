@@ -6,9 +6,9 @@ Pipeline ownership is deliberately separated:
 * ``_wilor_ps_pipeline`` owns hand-track association, WiLoR batching,
   sequence-level 3-D branch selection, angle repairs, and filtering.
 
-The selected VisionMD subject box is always applied before YOLO hand
-localization, preventing bystanders and reflections from competing with the
-task subject. A compact fixed hand ROI is attempted when appropriate. Wide
+The selected VisionMD subject box anchors a padded YOLO search area.
+Handedness, a participant reach envelope, and temporal association constrain
+hand selection; incomplete tracks trigger wider search or an explicit failure. A compact fixed hand ROI is attempted when appropriate. Wide
 hand trajectories start in dynamic mode; a diagnostically failed fixed result
 is automatically rerun with interpolated dynamic ROIs.
 """
@@ -23,6 +23,8 @@ from django.conf import settings
 from rest_framework.response import Response
 from ultralytics import YOLO
 from .base_task import BaseTask
+from ._ps_hand_search import (PS_SEARCH_VERSION, expanded_search_box,
+    associated_boxes, track_search_quality)
 from ._wilor_ps_pipeline import (WiLorBatch, angle_anomaly_diagnostics,
     choose_angle_estimator, geometry_angle, landmark_temporal_decode,
     palm_normal_angle, repair_short_flip_intervals,
@@ -146,39 +148,70 @@ class HandPronationSupinationTask(BaseTask):
         global _HAND_DEVICE
         if _HAND_DEVICE is None:
             _HAND_DEVICE = _device()
-        b=self.original_bounding_box; px1,py1=int(b["x"]),int(b["y"]); px2,py2=px1+int(b["width"]),py1+int(b["height"])
-        cap=cv2.VideoCapture(self.video_file_path); cap.set(cv2.CAP_PROP_POS_FRAMES,self.task_start_frame_idx)
-        count=self.task_end_frame_idx-self.task_start_frame_idx; step=max(1,round(self.video_fps/12.)); samples={}; cls=1 if self.HAND_LABEL=="Right" else 0
-        width = height = None
-        for i in range(count):
-            if self._cancelled(): raise RuntimeError("Analysis cancelled")
-            ok,frame=cap.read()
-            if not ok: break
-            if i%step: continue
-            frame=BaseTask.correct_frame_orientation(frame,self.video_rotation)
+        subject = self.original_bounding_box
+        count = self.task_end_frame_idx-self.task_start_frame_idx
+        step = max(1, round(self.video_fps/12.))
+        cls = 1 if self.HAND_LABEL == "Right" else 0
+        attempts = []
+        # Begin outside the person box; retry a wider area before constructing
+        # interpolated hand ROIs. Never accept a long unsupported trajectory.
+        for padding in (.25, .50):
+            cap = cv2.VideoCapture(self.video_file_path)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, self.task_start_frame_idx)
+            samples = {}; width = height = None
+            try:
+                for i in range(count):
+                    if self._cancelled(): raise RuntimeError("Analysis cancelled")
+                    ok, frame = cap.read()
+                    if not ok: break
+                    if i % step: continue
+                    frame = BaseTask.correct_frame_orientation(frame, self.video_rotation)
+                    if width is None:
+                        height, width = frame.shape[:2]
+                        search = expanded_search_box(subject, width, height, padding)
+                    px1, py1, px2, py2 = search
+                    crop = frame[py1:py2, px1:px2]
+                    def predict(active_device):
+                        return model.predict(crop, device=active_device, conf=.05,
+                                             classes=[cls], verbose=False)[0]
+                    result, _HAND_DEVICE = run_with_device_fallback(
+                        predict, _HAND_DEVICE, label="YOLO hand localization",
+                        on_cpu_fallback=lambda: reset_yolo_runtime(model))
+                    if result.boxes is not None and len(result.boxes):
+                        boxes = result.boxes.xyxy.cpu().numpy().astype(float)
+                        boxes[:, [0,2]] += px1; boxes[:, [1,3]] += py1
+                        boxes = associated_boxes(boxes, subject)
+                        if len(boxes): samples[i] = list(boxes)
+                    if i % max(1,count//20) == 0:
+                        self._progress(32+16*i/max(1,count), "Localizing hand in expanded search area")
+            finally:
+                cap.release()
             if width is None:
-                height, width = frame.shape[:2]
-                px1, px2 = np.clip([px1, px2], 0, width).astype(int)
-                py1, py2 = np.clip([py1, py2], 0, height).astype(int)
-                if px2 <= px1 or py2 <= py1:
-                    raise ValueError("The selected subject bounding box is outside the video frame.")
-            crop=frame[py1:py2,px1:px2]
-            def predict(active_device):
-                return model.predict(crop,device=active_device,conf=.05,
-                                     classes=[cls],verbose=False)[0]
-            result,_HAND_DEVICE=run_with_device_fallback(
-                predict,_HAND_DEVICE,label="YOLO hand localization",
-                on_cpu_fallback=lambda: reset_yolo_runtime(model))
-            if result.boxes is not None and len(result.boxes):
-                boxes=result.boxes.xyxy.cpu().numpy().astype(float); boxes[:,[0,2]]+=px1; boxes[:,[1,3]]+=py1; samples[i]=list(boxes)
-            if i%max(1,count//20)==0: self._progress(32+16*i/max(1,count),"YOLO hand localization")
-        cap.release()
-        track=select_moving_track_timed(samples)
-        timed=np.array([i for i,_ in track]); boxes=np.array([x for _,x in track]); ids=np.arange(count)
-        interpolated=np.column_stack([np.interp(ids,timed,boxes[:,j]) for j in range(4)])
-        fixed=square_roi(list(boxes),width,height,1.5); median=float(np.median(np.max(boxes[:,2:]-boxes[:,:2],axis=1)))
-        ratio=float(max(fixed[2]-fixed[0],fixed[3]-fixed[1])/max(median*1.5,1)); dynamic=np.array([_square(x,width,height) for x in interpolated])
-        return fixed,dynamic,ratio,count,len(track)/max(1,int(np.ceil(count/step)))
+                raise ValueError("No video frames could be read for the selected task interval.")
+            try:
+                track = select_moving_track_timed(samples)
+                quality = track_search_quality(track, count, step, self.video_fps,
+                                               search, width, height)
+            except RuntimeError as exc:
+                quality = {"pass": False, "reasons": [str(exc)]}
+            attempts.append({"padding_fraction": padding, "search_box_xyxy": search.tolist(),
+                             **quality})
+            self._localization = {"version": PS_SEARCH_VERSION, "attempts": attempts,
+                                  "expanded_retry": len(attempts)>1, **quality}
+            if quality["pass"]: break
+            self._progress(47, "Hand track incomplete; expanding search area")
+        if not quality["pass"]:
+            raise ValueError("P/S hand localization remains unreliable after expanding the search: "
+                             + "; ".join(quality["reasons"]) +
+                             ". Select a wider participant box or a shorter reliable interval.")
+        timed = np.array([i for i,_ in track]); boxes = np.array([x for _,x in track])
+        ids = np.arange(count)
+        interpolated = np.column_stack([np.interp(ids,timed,boxes[:,j]) for j in range(4)])
+        fixed = square_roi(list(boxes),width,height,1.5)
+        median = float(np.median(np.max(boxes[:,2:]-boxes[:,:2],axis=1)))
+        ratio = float(max(fixed[2]-fixed[0],fixed[3]-fixed[1])/max(median*1.5,1))
+        dynamic = np.array([_square(x,width,height) for x in interpolated])
+        return fixed,dynamic,ratio,count,quality["coverage"]
 
     def _infer(self,wilor,rois,count):
         cap=cv2.VideoCapture(self.video_file_path); cap.set(cv2.CAP_PROP_POS_FRAMES,self.task_start_frame_idx); raw=[]; projected=[]; pending=[]; start=0
@@ -216,7 +249,7 @@ class HandPronationSupinationTask(BaseTask):
                 self._progress(96,"MediaPipe passed screening; finalizing provisional result")
                 final=screening["final"]; initial=float(np.median(final[:max(1,round(.5*self.video_fps))]))
                 self._angles=(final-initial).tolist()
-                self._pipeline={"version":"mediapipe-screen-wilor-fallback-v1",
+                self._pipeline={"version":"ps-expanded-search-v1",
                     "engine":"mediapipe_world_landmarks","requires_verification":True,
                     "screening":{key:value for key,value in screening.items()
                                  if key not in {"raw","projected","corrected","final","diagnostics"}},
@@ -256,7 +289,7 @@ class HandPronationSupinationTask(BaseTask):
                           "error":f"{type(exc).__name__}: {exc}"}
         self._angles=relative.tolist()
         self._progress(98,"Finalizing P/S signal")
-        self._pipeline={"version":"mediapipe-screen-wilor-fallback-v1","engine":"yolo_wilor","requires_verification":not quality["pass"],"roi_mode":"dynamic" if direct_dynamic or rerun else "fixed","dynamic_rerun":rerun,"fixed_to_typical_crop_ratio":ratio,"localization_fps":12.,"track_coverage":coverage,"quality":quality,"temporal_refiner":temporal,"hand_detector":_hand_model_path(),"screening":{key:value for key,value in screening.items() if key not in {"raw","projected","corrected","final","diagnostics"}} if screening else {"skipped":True,"reason":"WiLoR explicitly requested"},"timing":{"localization_seconds":round(localization_seconds,3),"initial_wilor_seconds":round(initial_inference_seconds,3),"dynamic_rerun_seconds":round(rerun_seconds,3),"total_seconds":round(time.perf_counter()-total_started,3)}}
+        self._pipeline={"version":"ps-expanded-search-v1","engine":"yolo_wilor","requires_verification":not quality["pass"],"roi_mode":"dynamic" if direct_dynamic or rerun else "fixed","dynamic_rerun":rerun,"fixed_to_typical_crop_ratio":ratio,"localization_fps":12.,"track_coverage":coverage,"localization":self._localization,"quality":quality,"temporal_refiner":temporal,"hand_detector":_hand_model_path(),"screening":{key:value for key,value in screening.items() if key not in {"raw","projected","corrected","final","diagnostics"}} if screening else {"skipped":True,"reason":"WiLoR explicitly requested"},"timing":{"localization_seconds":round(localization_seconds,3),"initial_wilor_seconds":round(initial_inference_seconds,3),"dynamic_rerun_seconds":round(rerun_seconds,3),"total_seconds":round(time.perf_counter()-total_started,3)}}
         return self._format_output(corrected,projected)
 
     def _format_output(self,corrected,projected):
