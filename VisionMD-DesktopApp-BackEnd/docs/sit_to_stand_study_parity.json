@@ -1,0 +1,21 @@
+{
+  "recordings_processed": 109,
+  "expected_value_comparisons_by_feature": {
+    "ascent_time_10_90": 106,
+    "ascent_speed_cv": 106,
+    "lateral_shift_relative": 106,
+    "trunk_lateral_rom_deg": 106,
+    "pelvis_excursion_relative": 106,
+    "arm_cross_distance_mean": 106,
+    "arm_cross_distance_change": 106,
+    "combined_preparation_to_pelvis_end_s": 109,
+    "extra_speed_peaks": 109,
+    "combined_preparation_before_ascent_s": 93
+  },
+  "missing_study_values_not_compared": 37,
+  "absolute_tolerance": 2e-05,
+  "relative_tolerance": 1e-06,
+  "maximum_absolute_difference": 2.7011287192735267e-05,
+  "mismatches": [],
+  "note": "Study-specific exclusions remain study metadata; all product results request visual review. Timing missingness is preserved. No video inference was rerun."
+}

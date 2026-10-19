@@ -10,6 +10,7 @@ const taskSelectionFiles = import.meta.glob([
 
 const taskOptions = [
   { value: 'Gait', label: 'Gait' },
+  { value: 'Sit To Stand', label: 'Sit-to-stand' },
   { value: 'Finger Tap Left', label: 'Finger Tap Left' },
   { value: 'Finger Tap Right', label: 'Finger Tap Right' },
   { value: 'Hand Movement Left', label: 'Hand Movement Left' },

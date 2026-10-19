@@ -58,6 +58,12 @@ def attach_landmark_schema(payload, task_key):
                 "reason": "2D display edits cannot be propagated safely to 3D gait analysis",
             },
         })
+    elif task_key == "sit_to_stand":
+        schema.update({
+            "analysis": {"key": "sit_to_stand_analysis_cache.poses2d", "coordinateSpace": "video_pixels", "components": ["x", "y"]},
+            "normalization": {"key": "normalization_factor", "definition": "post-rise shoulder midpoint to ankle midpoint"},
+            "manualEditing": {"supported": False, "endpoint": None, "reason": "Review event boundaries using the sit-to-stand analysis window"},
+        })
     elif task_key.startswith("hand_tremor_"):
         schema.update({
             "analysis": {

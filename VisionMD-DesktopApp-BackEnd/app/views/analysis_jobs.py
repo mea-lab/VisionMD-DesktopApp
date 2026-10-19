@@ -74,13 +74,13 @@ def create_analysis_job(request, task_name):
     raw_json = request.POST.get("json_data")
     if not video_id or raw_json is None:
         return JsonResponse({"error": "id and json_data are required"}, status=400)
-    if task_name == 'gait':
+    if task_name in {'gait', 'sit_to_stand'}:
         try:
             height = float(json.loads(raw_json).get('height'))
             if not math.isfinite(height) or height <= 0:
                 raise ValueError()
         except (ValueError, TypeError, AttributeError):
-            return JsonResponse({'error': 'Enter a positive participant height before gait analysis.'}, status=400)
+            return JsonResponse({'error': 'Enter a positive participant height before analysis.'}, status=400)
     job_id = str(uuid4())
     job = {
         "id": job_id,

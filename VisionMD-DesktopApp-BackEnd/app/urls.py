@@ -11,6 +11,7 @@ from app.views.delete_video import delete_video
 from app.views.new_path import new_path
 from app.views.import_project_snapshot import import_project_snapshot
 from app.views.update_gait_segments import update_gait_segments
+from app.views.update_sit_to_stand import update_sit_to_stand
 from app.views.analysis_jobs import create_analysis_job, analysis_job
 
 urlpatterns = [
@@ -23,6 +24,7 @@ urlpatterns = [
     path('update_plot/', updatePlotData),
     path('update_landmarks/', update_landmarks),
     path('update_gait_segments/', update_gait_segments),
+    path('update_sit_to_stand/', update_sit_to_stand),
     path('update_video_data/', update_video_data),
 
     # POST Requests

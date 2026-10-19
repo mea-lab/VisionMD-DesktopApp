@@ -3,12 +3,12 @@ import CloudDownload from '@mui/icons-material/CloudDownload';
 import ArrowDropDown from '@mui/icons-material/ArrowDropDown';
 
 
-const FeatureTable = ({ tasks, selectedTaskIndex, fileName }) => {
+const FeatureTable = ({ tasks, selectedTaskIndex, fileName, includeUnavailable = false }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef();
 
   const task = tasks[selectedTaskIndex] || {};
-  const entries = Object.entries(task.data || {}).filter(([, v]) => typeof v === 'number' || typeof v === 'string');
+  const entries = Object.entries(task.data || {}).filter(([, v]) => typeof v === 'number' || typeof v === 'string' || (includeUnavailable && v === null));
   const header = useMemo(() => entries.map(([k]) => k), [entries]);
 
   const btn = `bg-[#1976d2] hover:bg-[#1565c0] text-white font-medium px-3 py-1 rounded-md inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed`;
@@ -84,7 +84,7 @@ const FeatureTable = ({ tasks, selectedTaskIndex, fileName }) => {
               <tr key={k}>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{k}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">
-                  {typeof v === 'number' ? v.toFixed(4) : v}
+                  {v == null ? 'Unavailable' : typeof v === 'number' ? v.toFixed(4) : v}
                 </td>
               </tr>
             ))}

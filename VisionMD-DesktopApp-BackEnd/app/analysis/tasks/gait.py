@@ -620,10 +620,10 @@ class GaitTask(BaseTask):
 
 
         # Getting camera properties
-        field_of_view = int(json_data.get('field_of_view')) if json_data.get('field_of_view') else None
-        sensor_height = int(json_data.get('sensor_height')) if json_data.get('sensor_height') else None
-        sensor_width = int(json_data.get('sensor_width')) if json_data.get('sensor_width') else None
-        focal_length = int(json_data.get('focal_length')) if json_data.get('focal_length') else None
+        field_of_view = float(json_data.get('field_of_view')) if json_data.get('field_of_view') else None
+        sensor_height = float(json_data.get('sensor_height')) if json_data.get('sensor_height') else None
+        sensor_width = float(json_data.get('sensor_width')) if json_data.get('sensor_width') else None
+        focal_length = float(json_data.get('focal_length')) if json_data.get('focal_length') else None
         temp_intrinsic = json_data.get('intrinsic_matrix')
         intrinsic_matrix = None if temp_intrinsic is None or np.any(np.array(temp_intrinsic) == None) else temp_intrinsic
         temp_extrinsic = json_data.get('extrinsic_matrix')
@@ -639,7 +639,7 @@ class GaitTask(BaseTask):
             intrinsic_matrix = [
                 [fx, 0,  cx],
                 [0,  fy, cy],
-                [0,  0,   0],
+                [0,  0,   1],
             ]
 
 
@@ -892,7 +892,7 @@ class GaitTask(BaseTask):
 
             # --- Set up optional camera parameters for this ---
             scalar_camera_args = {
-                k: int(v) 
+                k: float(v)
                 for k, v in
                 {
                     "default_fov_degrees": self.field_of_view,

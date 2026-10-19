@@ -202,6 +202,11 @@ def _assess_analysis_quality(result: dict[str, Any]) -> dict[str, Any]:
                     "label": "Failed", "reasons": reasons + ["Most P/S frames are low confidence"],
                     "metrics": metrics}
 
+    sts = result.get("sit_to_stand")
+    if isinstance(sts, dict):
+        reasons.extend(sts.get("quality", {}).get("warnings", []))
+        reasons.append("Review sit-to-stand event boundaries and upright posture; hand support is not assessed.")
+
     status = "review" if reasons else "good"
     return {"version": QUALITY_VERSION, "status": status,
             "label": "Needs review" if status == "review" else "Good",

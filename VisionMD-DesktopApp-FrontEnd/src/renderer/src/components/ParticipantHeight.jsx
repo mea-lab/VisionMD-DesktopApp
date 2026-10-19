@@ -6,6 +6,7 @@ import DialogActions from '@mui/material/DialogActions';
 
 export const validHeight = height => Number.isFinite(Number(height)) && Number(height) > 0;
 export const isGait = task => task?.name?.toLowerCase() === 'gait';
+export const requiresParticipantHeight = task => ['gait', 'sit to stand'].includes(task?.name?.toLowerCase());
 
 export function HeightInput({ value, onChange }) {
   const [unit, setUnit] = useState('cm');
@@ -33,14 +34,14 @@ export function useRequiredGaitHeight(tasks, setTasks) {
   tasksRef.current = tasks;
   const ensureHeight = task => {
     task = tasksRef.current.find(item => item.id === task?.id) || task;
-    if (!isGait(task) || validHeight(task.height)) return Promise.resolve(task?.height);
+    if (!requiresParticipantHeight(task) || validHeight(task.height)) return Promise.resolve(task?.height);
     setHeight(null);
     setOpen(true);
     return new Promise(resolve => { resolver.current = resolve; });
   };
   const finish = accepted => {
     const value = accepted ? Number(height) : null;
-    if (accepted) setTasks(previous => previous.map(task => isGait(task) ? { ...task, height: value } : task));
+    if (accepted) setTasks(previous => previous.map(task => requiresParticipantHeight(task) ? { ...task, height: value } : task));
     setOpen(false);
     resolver.current?.(value);
     resolver.current = null;
@@ -48,7 +49,7 @@ export function useRequiredGaitHeight(tasks, setTasks) {
   const heightDialog = <Dialog open={open} onClose={() => finish(false)}>
     <DialogTitle>Enter participant height</DialogTitle>
     <DialogContent>
-      <p className="mb-4">Participant height is required for gait analysis.</p>
+      <p className="mb-4">Participant height is required for gait and sit-to-stand setup.</p>
       <HeightInput value={height} onChange={setHeight} />
     </DialogContent>
     <DialogActions>

@@ -1,4 +1,4 @@
-import { useRequiredGaitHeight, isGait } from '../../components/ParticipantHeight';
+import { useRequiredGaitHeight, requiresParticipantHeight } from '../../components/ParticipantHeight';
 // src/pages/TaskDetails/JSONUploadDialog.jsx
 import { useState, useContext } from 'react';
 import Dialog from '@mui/material/Dialog';
@@ -82,7 +82,7 @@ export default function JSONUploadDialog({
   const fetchAnalysisDetails = async () => {
     try {
       let taskData = tasks[selectedTask];
-      if (isGait(taskData)) {
+      if (requiresParticipantHeight(taskData)) {
         const height = await ensureHeight(taskData);
         if (!height) return;
         taskData = { ...taskData, height };

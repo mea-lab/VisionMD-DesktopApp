@@ -653,3 +653,12 @@ criteria. Search boxes, attempts, coverage, gaps, and clipping are recorded in
 analysis cannot silently reuse the old tight-crop result. Existing saved task
 results remain unchanged until analyzed again. The provisional MediaPipe screen
 is unchanged; these safeguards apply to the YOLO/WiLoR path.
+
+### Sit-to-stand
+
+`SitToStandTask` (`sit_to_stand.py`, canonical display value `Sit To Stand`,
+user-facing label **Sit-to-stand**) reuses gait's pose/video setup through its
+`BaseTask` subclass. Both frontend views are registered. Its single-transition
+plots and cached boundary editor follow the gait segment-editor pattern rather
+than repetitive-cycle editing. See [sit-to-stand task documentation](../../../docs/sit_to_stand.md)
+for feature definitions, event-review behavior, acquisition requirements and tests.

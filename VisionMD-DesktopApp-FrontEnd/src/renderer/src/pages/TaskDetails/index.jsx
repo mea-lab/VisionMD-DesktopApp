@@ -1,4 +1,4 @@
-import { useRequiredGaitHeight, isGait } from '../../components/ParticipantHeight';
+import { useRequiredGaitHeight, requiresParticipantHeight } from '../../components/ParticipantHeight';
 //src/pages/TaskDetails/index.jsx
 import {
   useContext,
@@ -146,7 +146,7 @@ const TaskDetails = () => {
     try {
       let taskData = tasks.find(t => t.id === taskId);
       if (!taskData) throw new Error(`Task with id ${taskId} not found`);
-      if (isGait(taskData)) {
+      if (requiresParticipantHeight(taskData)) {
         const height = await ensureHeight(taskData);
         if (!height) return false;
         taskData = { ...taskData, height };
