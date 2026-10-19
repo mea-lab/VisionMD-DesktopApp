@@ -56,10 +56,12 @@ requested; no diagnosis, MDS-UPDRS score, or hand-support classification is prod
 
 ## Results and manual review
 
-The main graph shows normalized ankle-relative pelvis height. The preparation
-panel shows pelvis and relative-shoulder departures divided by their thresholds;
-1 denotes threshold crossing. Optional velocity is in image pixels/second,
-with eligible peaks marked. Gait and sit-to-stand use the same `VideoSignalPlot` component (the existing
+The results use the same `GaitGraphs` card and signal dropdown as gait. The
+default selection is normalized ankle-relative pelvis height. The dropdown also
+offers preparation signals (pelvis and relative-shoulder departure divided by
+their thresholds; 1 denotes crossing) and vertical velocity in image pixels/second
+with eligible speed peaks marked. One selected view is shown at a time, matching
+gait. The 10–90% overlay remains an optional control inside that same card. Gait and sit-to-stand use the same `VideoSignalPlot` component (the existing
 uPlot engine) for rendering, native zoom, click-to-seek and video-frame cursor
 synchronization. Sit-to-stand supplies its frame-based timestamps, signals,
 reference thresholds, event markers and optional peak overlays.
@@ -121,3 +123,8 @@ plot options, multiple preparation channels, absolute timestamps, event
 constraints, click-to-seek versus native zoom, overlays, and multiple gait
 walking/turn intervals. Rendering engines are substituted in this Node check;
 a live browser/video acceptance run is still required.
+
+The visible analysis-window chrome is also shared: `AnalysisWindowPanel` supplies
+the header, collapse behavior, border, typography and padding to both gait and
+sit-to-stand. Browser checks with synthetic signals confirmed all three dropdown
+choices render without console errors. This is a UI check, not video validation.

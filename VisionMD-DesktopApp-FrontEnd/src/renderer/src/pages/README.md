@@ -109,8 +109,10 @@ pages/
   WaveSurfer media/regions lifecycle, hover time labels, region editing and
   playback synchronization. It accepts interval regions or point markers;
   an optional pose-signal preview avoids audio decoding for silent videos.
-- `GaitGraphs` and `GaitSegmentsPanel` configure those shared components for
-  gait. `SitToStandGraphs` supplies the sit-to-stand signals and three boundaries.
+- `GaitGraphs` supplies the same graph card and signal dropdown to both gait and
+  sit-to-stand, with configurable signal groups and overlays. `AnalysisWindowPanel`
+  supplies identical collapsible panel chrome to `GaitSegmentsPanel` and
+  `SitToStandGraphs`. The latter supplies only its signals and three boundaries.
   Task-specific validation and cached re-analysis requests stay in the adapters.
 
 Reuse these components for new non-cyclic tasks; repeated-cycle tasks continue

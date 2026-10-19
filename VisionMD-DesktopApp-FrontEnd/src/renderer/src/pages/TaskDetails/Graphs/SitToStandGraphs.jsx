@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import VideoSignalPlot from './VideoSignalPlot';
+import GaitGraphs from './GaitGraphs';
+import AnalysisWindowPanel from './AnalysisWindowPanel';
 import VideoSegmentsTimeline from './VideoSegmentsTimeline';
 import { reviewedBoundary } from './sitToStandBoundaries';
 
@@ -10,7 +11,7 @@ const EVENTS = [
 ];
 const BLUE = '#60a5fa';
 const ORANGE = '#fb923c';
-const inputClass = 'w-24 rounded border border-zinc-500 bg-transparent p-1 text-gray-100';
+const inputClass = 'ml-1 w-24 rounded border border-zinc-500 bg-transparent p-1';
 
 export default function SitToStandGraphs({ selectedTaskIndex, tasks, setTasks, videoRef }) {
   const task = tasks?.[selectedTaskIndex];
@@ -18,8 +19,6 @@ export default function SitToStandGraphs({ selectedTaskIndex, tasks, setTasks, v
   const sts = data?.sit_to_stand;
   const cache = data?.sit_to_stand_analysis_cache;
   const [draft, setDraft] = useState(sts?.boundaries || {});
-  const [showPreparation, setShowPreparation] = useState(true);
-  const [showVelocity, setShowVelocity] = useState(false);
   const [showCentral, setShowCentral] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -63,26 +62,27 @@ export default function SitToStandGraphs({ selectedTaskIndex, tasks, setTasks, v
   const markers = EVENTS.map(([key,label,color]) => ({time:sts.boundaries[key],label,color}));
   const bands = [{start:sts.boundaries.preparation_start,end:sts.boundaries.rise_end,color:'rgba(96,165,250,.07)'},
     ...(showCentral ? [{...sts.central_ascent,color:'rgba(96,165,250,.17)'}] : [])];
-  const plot = (title, unit, series, extra = {}) => <VideoSignalPlot title={title} unit={unit} axisLabel={title === 'Pelvis height' ? 'Pelvis height (relative)' : title === 'Preparation signals' ? 'Departure / threshold' : 'Velocity (pixels/s)'} series={series} time={time} videoRef={videoRef} markers={markers} bands={bands} height={title === 'Pelvis height' ? 280 : 230} {...extra} />;
-  return <div className="mx-4 text-gray-100">
-    <div className="mb-4 rounded-lg border border-zinc-500 bg-zinc-700">
-      <button type="button" className="w-full p-3 text-left" onClick={() => setExpanded(!expanded)} aria-expanded={expanded}>{expanded ? '▾' : '▸'} Analysis window</button>
-      {expanded && <div className="border-t border-zinc-500 p-3">
-        <div className="text-xs text-gray-300">Drag a marker or edit its time; the video follows. Apply to recalculate from saved landmarks.</div>
+  const plotGroups = [
+    {key:'pelvis_height',title:'Pelvis height',unit:'Relative to ankle midpoint · Body-size reference units',axisLabel:'Pelvis height (relative)',time,series:[{name:'Pelvis height',values:signals.pelvis_height,color:BLUE}]},
+    {key:'preparation',title:'Preparation signals',unit:'Departure ÷ detection threshold · Threshold = 1',axisLabel:'Departure / threshold',time,series:[{name:'Pelvis departure',values:signals.pelvis_evidence,color:BLUE},{name:'Shoulder movement relative to pelvis',values:signals.shoulder_evidence,color:ORANGE}],threshold:1},
+    {key:'velocity',title:'Pelvis vertical velocity',unit:'Image-vertical velocity (pixels/s) · Peaks counted from absolute speed',axisLabel:'Velocity (pixels/s)',time,series:[{name:'Vertical velocity',values:signals.pelvis_velocity,color:BLUE}],peaks:sts.speed_peaks},
+  ];
+  return <div className="text-gray-100">
+    <AnalysisWindowPanel title="Preparation & rise segments" expanded={expanded} onToggle={() => setExpanded(!expanded)} description={`Cached sit-to-stand range: ${start.toFixed(3)}–${end.toFixed(3)} s. Drag markers to adjust times; click to seek.`}>
         <VideoSegmentsTimeline videoRef={videoRef} start={start} end={end} regions={regions} onRegionUpdated={updateRegion} previewSignal={signals.pelvis_height} previewStart={start} fps={fps} disabled={busy} label="Editable preparation and rise boundaries" />
-        <div className="mt-2 flex flex-wrap gap-3">{EVENTS.map(([key,label,color]) => <label key={key} className="flex flex-wrap items-center gap-2 text-sm"><span style={{ color }}>┆</span>{label}<input aria-label={label} className={inputClass} type="number" min={start} max={end} step={1/fps} value={Number.isFinite(draft[key]) ? Number(draft[key].toFixed(4)) : ''} onChange={e => change(key,e.target.value === '' ? NaN : Number(e.target.value))} disabled={busy} /></label>)}</div>
-        <div className="mt-3 flex flex-wrap gap-3"><button type="button" disabled={busy || !valid} className="rounded bg-[#1976d2] px-3 py-1 disabled:opacity-50" onClick={() => apply(false)}>{busy ? 'Recalculating…' : 'Apply boundaries'}</button><button type="button" className="rounded border border-zinc-400 px-3 py-1 disabled:opacity-50" disabled={busy} onClick={() => apply(true)}>Restore automatic</button></div>
+        <div className="mt-2 text-xs">Purple: preparation onset · Orange: upward-ascent onset · Green: pelvic movement end</div>
+        <div className="mt-3 flex flex-wrap items-center gap-3">{EVENTS.map(([key,label]) => <label key={key} className="flex shrink-0 items-center whitespace-nowrap">{label}<input aria-label={label} className={inputClass} type="number" min={start} max={end} step={1/fps} value={Number.isFinite(draft[key]) ? Number(draft[key].toFixed(4)) : ''} onChange={e => change(key,e.target.value === '' ? NaN : Number(e.target.value))} disabled={busy} /></label>)}</div>
+        <div className="mt-3 flex flex-wrap gap-3"><button type="button" disabled={busy || !valid} className="rounded bg-[#1976d2] px-3 py-1 disabled:opacity-50" onClick={() => apply(false)}>{busy ? 'Recalculating…' : 'Apply from cached sit-to-stand landmarks'}</button><button type="button" className="rounded border border-zinc-400 px-3 py-1 disabled:opacity-50" disabled={busy} onClick={() => apply(true)}>Restore automatic</button></div>
         {!valid && <p role="alert" className="mt-2 text-sm text-orange-300">Choose preparation onset ≤ upward-ascent onset &lt; pelvic movement end, within the recording.</p>}
         {error && <p role="alert" className="mt-2 text-sm text-red-300">{error}</p>}
-      </div>}
-    </div>
-    <div className="flex flex-wrap gap-4 text-sm"><label><input type="checkbox" checked={showPreparation} onChange={e => setShowPreparation(e.target.checked)} /> Preparation signals</label><label><input type="checkbox" checked={showVelocity} onChange={e => setShowVelocity(e.target.checked)} /> Velocity &amp; peaks</label><label><input type="checkbox" checked={showCentral} onChange={e => setShowCentral(e.target.checked)} /> 10–90% interval</label></div>
-    <div className="mt-3 flex flex-wrap gap-3 text-xs">{EVENTS.map(([key,label,color]) => <span key={key}><span style={{ color }}>┆</span> {label}: {sts.boundaries[key].toFixed(3)} s</span>)}</div>
-    {plot('Pelvis height','Relative to ankle midpoint · Body-size reference units',[{ name:'Pelvis height',values:signals.pelvis_height,color:BLUE }])}
-    {showPreparation && plot('Preparation signals','Departure ÷ detection threshold · Threshold = 1',[{ name:'Pelvis departure',values:signals.pelvis_evidence,color:BLUE },{ name:'Shoulder movement relative to pelvis',values:signals.shoulder_evidence,color:ORANGE }],{ threshold:1 })}
-    {showVelocity && plot('Pelvis vertical velocity','Image-vertical velocity (pixels/s) · Peaks counted from absolute speed',[{ name:'Vertical velocity',values:signals.pelvis_velocity,color:BLUE }],{ peaks:sts.speed_peaks })}
+    </AnalysisWindowPanel>
+    <GaitGraphs selectedTaskIndex={selectedTaskIndex} tasks={tasks} videoRef={videoRef} plotGroups={plotGroups} initialSignal="pelvis_height" signalLabel="Sit-to-stand signal" markers={markers} bands={bands}
+      controls={<label><input type="checkbox" checked={showCentral} onChange={e => setShowCentral(e.target.checked)} /> 10–90% interval</label>}
+      eventLegend={EVENTS.map(([key,label,color]) => <span key={key}><span style={{color}}>┆</span> {label}: {sts.boundaries[key].toFixed(3)} s</span>)} />
+    <div className="mx-4 mt-4">
     <p className="text-xs text-gray-300">{sts.reviewed ? 'Reviewed boundaries applied.' : 'Automatic boundaries; review in the video.'} Motion feature window: {sts.feature_window.start.toFixed(3)}–{sts.feature_window.end.toFixed(3)} s ({sts.feature_window.source === 'automatic_5_95' ? 'automatic 5–95% rise' : 'reviewed rise interval'}). Central ascent time remains the automatic 10–90% measurement.</p>
     <p className="mt-2 text-xs text-gray-300">Pelvic movement end does not confirm full upright posture. Arm geometry does not establish hand support. Metric height scaling is not applied.</p>
     {sts.quality.warnings.map((warning,i) => <p key={i} className="mt-2 text-sm text-orange-300">{warning}</p>)}
+    </div>
   </div>;
 }

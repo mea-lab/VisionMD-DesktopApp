@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import VideoSegmentsTimeline from './VideoSegmentsTimeline';
+import AnalysisWindowPanel from './AnalysisWindowPanel';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const numberValue = value => value === '' ? NaN : Number(value);
@@ -90,10 +91,7 @@ export default function GaitSegmentsPanel({ selectedTaskIndex, tasks, setTasks, 
     setTurns([...turns, { start: middle - half, end: middle + half }].sort((a, b) => a.start - b.start));
   };
   const input = (label, value, min, max, onChange) => <label className="flex shrink-0 items-center whitespace-nowrap">{label}<input aria-label={label} className={inputClass} type="number" step="0.001" min={min} max={max} value={Number.isFinite(value) ? value : ''} onChange={e => onChange(numberValue(e.target.value))} /></label>;
-  return <div className="mb-6 rounded-lg border border-zinc-600 bg-zinc-700">
-    <button type="button" className="w-full px-4 py-2 text-left font-semibold" onClick={() => setExpanded(!expanded)}>{expanded ? '▾' : '▸'} Walking &amp; turning segments</button>
-    {expanded && <div className="border-t border-zinc-600 p-3">
-      <div className="mb-2 text-xs">Cached gait range: {cacheStart.toFixed(3)}–{cacheEnd.toFixed(3)} s. Drag colored edges to adjust times; click to seek.</div>
+  return <AnalysisWindowPanel title="Walking & turning segments" expanded={expanded} onToggle={() => setExpanded(!expanded)} description={`Cached gait range: ${cacheStart.toFixed(3)}–${cacheEnd.toFixed(3)} s. Drag colored edges to adjust times; click to seek.`}>
       <VideoSegmentsTimeline videoRef={videoRef} start={cacheStart} end={cacheEnd} regions={regions} onRegionUpdated={updateRegion} disabled={applying} label="Walking and turning intervals" />
       <div className="mt-2 text-xs">Blue/green: walking intervals · Red: {metadata?.transition_guard_seconds > 0 ? 'saved padded turn intervals — redetect to update' : 'estimated turns (no added time margin)'}</div>
       <div className="mt-3 flex items-center gap-3 overflow-x-auto">
@@ -115,6 +113,5 @@ export default function GaitSegmentsPanel({ selectedTaskIndex, tasks, setTasks, 
       {invalid && <div role="alert" className="mt-2 text-sm text-red-400">Choose ordered, non-overlapping turns inside the walking range.</div>}
       {!cache && <div className="mt-2 text-sm">This older result has no cached poses. Run gait analysis to edit intervals.</div>}
       {error && <div role="alert" className="mt-2 text-sm text-red-400">{error}</div>}
-    </div>}
-  </div>;
+  </AnalysisWindowPanel>;
 }
