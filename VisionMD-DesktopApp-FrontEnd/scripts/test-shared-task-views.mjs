@@ -56,7 +56,8 @@ assert(html.includes('font-semibold') && html.includes('mx-4 min-w-0 rounded-lg'
 assert.equal(__plots.length,1);assert.equal(__plots[0].data[0][0],2);assert.equal(__plots[0].data[0].at(-1),6);
 assert.equal(__plots[0].options.height,320);
 assert.equal(__timelines.length,1);assert.equal(__timelines[0].regions.filter(r=>r.end==null).length,3);
-assert.equal(__timelines[0].previewSignal,signals.pelvis_height);
+assert.equal(__timelines[0].previewSignal,undefined,'timeline must use video audio, not pelvis data');
+assert.equal(__timelines[0].videoRef,props.videoRef);
 __timelines[0].onRegionUpdated({id:'preparation_start',start:2.75});assert.equal(video.currentTime,2.7666666666666666);
 const chart={over:{getBoundingClientRect:()=>({left:20})},posToVal:x=>x/100+2};
 __plots[0].options.hooks.ready[0](chart);
@@ -77,4 +78,7 @@ const sitSource=readFileSync(path.join(graphs,'SitToStandGraphs.jsx'),'utf8');
 assert(!sitSource.includes('<svg'));assert(sitSource.includes('<GaitGraphs'));assert(sitSource.includes('<AnalysisWindowPanel'));
 assert(readFileSync(path.join(graphs,'GaitSegmentsPanel.jsx'),'utf8').includes('<AnalysisWindowPanel'));
 assert(!readFileSync(path.join(graphs,'GaitSegmentsPanel.jsx'),'utf8').includes("from 'wavesurfer.js'"));
+const timelineSource=readFileSync(path.join(graphs,'VideoSegmentsTimeline.jsx'),'utf8');
+assert(timelineSource.includes('new Audio(video.currentSrc || video.src)'));
+assert(!timelineSource.includes('previewSignal') && !timelineSource.includes('peaks,'));
 console.log('PASS: shared task plots, absolute timestamps, two preparation channels, three draggable events, frame snapping, click-to-seek vs zoom, drawing overlays, and multiple gait turn/walking intervals.');

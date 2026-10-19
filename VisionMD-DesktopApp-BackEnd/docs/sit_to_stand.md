@@ -68,8 +68,10 @@ reference thresholds, event markers and optional peak overlays.
 
 The small analysis window uses `VideoSegmentsTimeline`, extracted from gait's
 WaveSurfer region editor and now used by both tasks. Gait supplies walking/turn
-intervals; sit-to-stand supplies a pose-signal preview and three point markers.
-The pose preview supports silent videos and is padded to absolute video time.
+intervals; sit-to-stand supplies three point markers. Both timelines display
+the same video audio waveform; no pose data is passed into the waveform.
+If audio decoding fails, the existing error message directs the reviewer to
+the time fields. Pose signals remain in the analysis graph below.
 The window supports dragging or numerically editing preparation
 onset, upward-ascent onset and pelvic movement end. Editing seeks the video;
 **Apply boundaries** performs cached re-analysis. Ordered, finite, in-range

@@ -108,7 +108,8 @@ pages/
 - `TaskDetails/Graphs/VideoSegmentsTimeline.jsx` contains gait's shared
   WaveSurfer media/regions lifecycle, hover time labels, region editing and
   playback synchronization. It accepts interval regions or point markers;
-  an optional pose-signal preview avoids audio decoding for silent videos.
+  the waveform always comes from the video audio, as in gait. Pose signals
+  belong in `VideoSignalPlot`, never in the timeline waveform.
 - `GaitGraphs` supplies the same graph card and signal dropdown to both gait and
   sit-to-stand, with configurable signal groups and overlays. `AnalysisWindowPanel`
   supplies identical collapsible panel chrome to `GaitSegmentsPanel` and

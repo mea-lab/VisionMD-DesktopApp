@@ -5,7 +5,7 @@ import HoverPlugin from 'wavesurfer.js/plugins/hover';
 
 /** Gait's WaveSurfer region editor shared by walking and single-rise tasks. */
 export default function VideoSegmentsTimeline({ videoRef, start, end, regions,
-  onRegionUpdated, previewSignal, previewStart = start, fps, disabled = false,
+  onRegionUpdated, disabled = false,
   label = 'Editable analysis intervals' }) {
   const containerRef = useRef(null);
   const waveRef = useRef(null);
@@ -33,22 +33,9 @@ export default function VideoSegmentsTimeline({ videoRef, start, end, regions,
     setError('');
     const preview = new Audio(video.currentSrc || video.src);
     const duration = Number.isFinite(video.duration) ? Math.max(end,video.duration) : end;
-    // A pose preview supports silent videos, and is padded to absolute video
-    // time so non-zero task starts never shift editable markers.
-    let peaks;
-    if (previewSignal?.length && fps > 0) {
-      const channel = new Float32Array(Math.ceil(duration*fps)+1);
-      const max = previewSignal.reduce((v,x) => Math.max(v,Math.abs(x || 0)),1e-8);
-      previewSignal.forEach((value,i) => {
-        const index = Math.round(previewStart*fps)+i;
-        if (index >= 0 && index < channel.length) channel[index] = Number.isFinite(value) ? value/max : 0;
-      });
-      peaks = [channel];
-    }
     const wave = WaveSurfer.create({ container: containerRef.current, media: preview,
       height: 82, waveColor: '#6b7280', progressColor: '#374151', cursorColor: '#111827',
-      cursorWidth: 3, barWidth: 2, barRadius: 2, normalize: true,
-      ...(peaks ? { peaks, duration } : {}) });
+      cursorWidth: 3, barWidth: 2, barRadius: 2, normalize: true });
     const plugin = wave.registerPlugin(RegionsPlugin.create());
     wave.registerPlugin(HoverPlugin.create({ lineColor: '#111827', lineWidth: 1,
       labelBackground: '#18181b', labelColor: '#f3f4f6', labelSize: '12px',
@@ -68,7 +55,7 @@ export default function VideoSegmentsTimeline({ videoRef, start, end, regions,
       wave.destroy(); preview.pause(); preview.removeAttribute('src'); preview.load();
       waveRef.current = null; pluginRef.current = null;
     };
-  }, [videoRef, start, end, previewSignal, previewStart, fps]);
+  }, [videoRef, start, end]);
   useEffect(() => { renderRegions(); }, [regions, disabled]);
   return <div><div ref={containerRef} role="group" aria-label={label} className="overflow-x-auto rounded bg-zinc-800" />{error && <p role="alert" className="mt-2 text-sm text-orange-300">{error}</p>}</div>;
 }
