@@ -99,3 +99,20 @@ pages/
 - Implemented using customized WaveSurfer.js 
 - Supports zoom controls through pixel-per-second ratio calculations
 - Synchronizes with video playback via event listeners on timeupdate
+
+### Shared gait and transition result components
+
+- `TaskDetails/Graphs/VideoSignalPlot.jsx` contains the shared uPlot renderer,
+  responsive sizing, click-to-seek, native zoom, video-frame cursor updates,
+  reference lines, event markers and optional peak overlays.
+- `TaskDetails/Graphs/VideoSegmentsTimeline.jsx` contains gait's shared
+  WaveSurfer media/regions lifecycle, hover time labels, region editing and
+  playback synchronization. It accepts interval regions or point markers;
+  an optional pose-signal preview avoids audio decoding for silent videos.
+- `GaitGraphs` and `GaitSegmentsPanel` configure those shared components for
+  gait. `SitToStandGraphs` supplies the sit-to-stand signals and three boundaries.
+  Task-specific validation and cached re-analysis requests stay in the adapters.
+
+Reuse these components for new non-cyclic tasks; repeated-cycle tasks continue
+using `WavePlotEditable`. Run `npm run test:task-views` to check both adapters
+and the shared plot configuration without running pose estimation.

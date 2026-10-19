@@ -59,10 +59,16 @@ requested; no diagnosis, MDS-UPDRS score, or hand-support classification is prod
 The main graph shows normalized ankle-relative pelvis height. The preparation
 panel shows pelvis and relative-shoulder departures divided by their thresholds;
 1 denotes threshold crossing. Optional velocity is in image pixels/second,
-with eligible peaks marked. All charts share real frame-based timestamps, event
-markers and video seeking. Playback updates the chart cursor.
+with eligible peaks marked. Gait and sit-to-stand use the same `VideoSignalPlot` component (the existing
+uPlot engine) for rendering, native zoom, click-to-seek and video-frame cursor
+synchronization. Sit-to-stand supplies its frame-based timestamps, signals,
+reference thresholds, event markers and optional peak overlays.
 
-The small analysis window supports dragging or numerically editing preparation
+The small analysis window uses `VideoSegmentsTimeline`, extracted from gait's
+WaveSurfer region editor and now used by both tasks. Gait supplies walking/turn
+intervals; sit-to-stand supplies a pose-signal preview and three point markers.
+The pose preview supports silent videos and is padded to absolute video time.
+The window supports dragging or numerically editing preparation
 onset, upward-ascent onset and pelvic movement end. Editing seeks the video;
 **Apply boundaries** performs cached re-analysis. Ordered, finite, in-range
 boundaries are required. Preparation-only edits change timing features, leaving
@@ -109,3 +115,9 @@ within numerical tolerance, including missing preparation lead-in values; see
 legacy features and are not used as numerical references for those seven
 features. This is not a fresh detector run or an independent clinical validation.
 A fresh video/desktop interaction acceptance run remains to be performed.
+
+Frontend refactor verification: `npm run test:task-views` covers the shared
+plot options, multiple preparation channels, absolute timestamps, event
+constraints, click-to-seek versus native zoom, overlays, and multiple gait
+walking/turn intervals. Rendering engines are substituted in this Node check;
+a live browser/video acceptance run is still required.

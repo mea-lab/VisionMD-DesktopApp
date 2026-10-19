@@ -46,7 +46,8 @@
     "lint": "eslint .",
     "lint:fix": "eslint --fix",
     "format:check": "prettier 'src/**/*.{js,jsx,ts,tsx,mdx}' --check",
-    "formt:fix": "prettier 'src/**/*.{js,jsx,ts,tsx,mdx}' --write"
+    "formt:fix": "prettier 'src/**/*.{js,jsx,ts,tsx,mdx}' --write",
+    "test:task-views": "node scripts/test-shared-task-views.mjs"
   },
   "eslintConfig": {
     "extends": [

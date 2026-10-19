@@ -1,7 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import WaveSurfer from 'wavesurfer.js';
-import RegionsPlugin from 'wavesurfer.js/plugins/regions';
-import HoverPlugin from 'wavesurfer.js/plugins/hover';
+import { useEffect, useMemo, useState } from 'react';
+import VideoSegmentsTimeline from './VideoSegmentsTimeline';
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const numberValue = value => value === '' ? NaN : Number(value);
@@ -25,89 +23,41 @@ export default function GaitSegmentsPanel({ selectedTaskIndex, tasks, setTasks, 
   const [expanded, setExpanded] = useState(true);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState('');
-  const waveformRef = useRef(null);
-  const waveRef = useRef(null);
-  const regionsRef = useRef(null);
-  const syncing = useRef(false);
-  const current = useRef({ turns, walking });
-  current.current = { turns, walking };
   useEffect(() => { setTurns(detectedTurns); }, [detectedTurns]);
   useEffect(() => { setWalking(data.walking_range || { start: cacheStart, end: cacheEnd }); }, [data.walking_range, cacheStart, cacheEnd]);
-
-  const renderRegions = () => {
-    const regions = regionsRef.current;
-    if (!regions) return;
-    syncing.current = true;
-    regions.clearRegions();
-    const { turns: intervals, walking: range } = current.current;
-    if (!Number.isFinite(range.start) || !Number.isFinite(range.end) || range.end <= range.start) {
-      syncing.current = false;
-      return;
-    }
-    let start = range.start;
-    const walkingRegion = (a, b, index, last) => {
-      if (b <= a) return;
-      regions.addRegion({ id: `walking-${index}`, start: a, end: b, drag: false,
+  const regions = useMemo(() => {
+    const result = [];
+    if (!Number.isFinite(walking.start) || !Number.isFinite(walking.end) || walking.end <= walking.start) return result;
+    let start = walking.start;
+    const walkingRegion = (a,b,index,last) => {
+      if (b > a) result.push({ id: `walking-${index}`, start: a, end: b, drag: false,
         resize: index === 0 || last, resizeStart: index === 0, resizeEnd: last,
         color: index % 2 ? 'rgba(34,197,94,0.28)' : 'rgba(37,99,235,0.30)' });
     };
-    intervals.forEach((turn, index) => {
+    turns.forEach((turn,index) => {
       if (!Number.isFinite(turn.start) || !Number.isFinite(turn.end)) return;
-      const a = clamp(turn.start, range.start, range.end);
-      const b = clamp(turn.end, a, range.end);
-      walkingRegion(start, a, index, false);
-      if (b > a) regions.addRegion({ id: `turn-${index}`, start: a, end: b,
-        drag: true, resize: true, color: 'rgba(239,68,68,0.42)' });
+      const a = clamp(turn.start,walking.start,walking.end), b = clamp(turn.end,a,walking.end);
+      walkingRegion(start,a,index,false);
+      if (b > a) result.push({ id: `turn-${index}`, start: a, end: b, drag: true, resize: true, color: 'rgba(239,68,68,0.42)' });
       start = b;
     });
-    walkingRegion(start, range.end, intervals.length, true);
-    syncing.current = false;
+    walkingRegion(start,walking.end,turns.length,true);
+    return result;
+  }, [turns, walking]);
+  const updateRegion = region => {
+    const gap = fps > 0 ? 1/fps : .001;
+    if (region.id.startsWith('turn-')) {
+      const index = Number(region.id.slice(5));
+      const minimum = turns[index-1] ? turns[index-1].end+gap : walking.start;
+      const maximum = turns[index+1] ? turns[index+1].start-gap : walking.end;
+      const start = clamp(Number(region.start.toFixed(3)),minimum,maximum-gap);
+      const end = clamp(Number(region.end.toFixed(3)),start+gap,maximum);
+      setTurns(previous => previous.map((item,i) => i === index ? { start,end } : item));
+    } else {
+      setWalking({ start: region.id === 'walking-0' ? clamp(Number(region.start.toFixed(3)),cacheStart,(turns[0]?.start ?? walking.end)-gap) : walking.start,
+        end: region.id === `walking-${turns.length}` ? clamp(Number(region.end.toFixed(3)),(turns.at(-1)?.end ?? walking.start)+gap,cacheEnd) : walking.end });
+    }
   };
-
-  useEffect(() => {
-    if (!expanded || !videoRef.current || !waveformRef.current || cacheEnd <= cacheStart) return;
-    const video = videoRef.current;
-    const preview = new Audio(video.currentSrc || video.src);
-    const wave = WaveSurfer.create({ container: waveformRef.current, media: preview,
-      height: 82, waveColor: '#6b7280', progressColor: '#374151', cursorColor: '#111827',
-      cursorWidth: 3, barWidth: 2, barRadius: 2, normalize: true });
-    const regions = wave.registerPlugin(RegionsPlugin.create());
-    wave.registerPlugin(HoverPlugin.create({ lineColor: '#111827', lineWidth: 1,
-      labelBackground: '#18181b', labelColor: '#f3f4f6', labelSize: '12px',
-      formatTimeCallback: seconds => `${seconds.toFixed(3)} s` }));
-    waveRef.current = wave;
-    regionsRef.current = regions;
-    wave.on('ready', () => { wave.zoom(Math.max(1, 720 / (video.duration || cacheEnd))); renderRegions(); });
-    regions.on('region-updated', region => {
-      if (syncing.current) return;
-      const { turns: intervals, walking: range } = current.current;
-      const gap = fps > 0 ? 1 / fps : 0.001;
-      if (region.id.startsWith('turn-')) {
-        const index = Number(region.id.slice(5));
-        const minimum = intervals[index - 1]?.end + gap || range.start;
-        const maximum = intervals[index + 1]?.start - gap || range.end;
-        const start = clamp(Number(region.start.toFixed(3)), minimum, maximum - gap);
-        const end = clamp(Number(region.end.toFixed(3)), start + gap, maximum);
-        setTurns(previous => previous.map((item, i) => i === index ? { start, end } : item));
-      } else {
-        const first = region.id === 'walking-0';
-        const last = region.id === `walking-${intervals.length}`;
-        setWalking({ start: first ? clamp(Number(region.start.toFixed(3)), cacheStart, (intervals[0]?.start ?? range.end) - gap) : range.start,
-          end: last ? clamp(Number(region.end.toFixed(3)), (intervals.at(-1)?.end ?? range.start) + gap, cacheEnd) : range.end });
-      }
-    });
-    wave.on('interaction', time => { video.currentTime = time; });
-    const sync = () => { if (Number.isFinite(video.currentTime)) wave.setTime(video.currentTime); };
-    video.addEventListener('timeupdate', sync);
-    video.addEventListener('seeked', sync);
-    return () => {
-      video.removeEventListener('timeupdate', sync);
-      video.removeEventListener('seeked', sync);
-      wave.destroy(); preview.pause(); preview.removeAttribute('src'); preview.load();
-      waveRef.current = null; regionsRef.current = null;
-    };
-  }, [expanded, videoRef, cacheStart, cacheEnd]);
-  useEffect(() => { renderRegions(); }, [turns, walking]);
 
   const invalid = !Number.isFinite(walking.start) || !Number.isFinite(walking.end)
     || walking.start < cacheStart || walking.end > cacheEnd || walking.end <= walking.start
@@ -144,7 +94,7 @@ export default function GaitSegmentsPanel({ selectedTaskIndex, tasks, setTasks, 
     <button type="button" className="w-full px-4 py-2 text-left font-semibold" onClick={() => setExpanded(!expanded)}>{expanded ? '▾' : '▸'} Walking &amp; turning segments</button>
     {expanded && <div className="border-t border-zinc-600 p-3">
       <div className="mb-2 text-xs">Cached gait range: {cacheStart.toFixed(3)}–{cacheEnd.toFixed(3)} s. Drag colored edges to adjust times; click to seek.</div>
-      <div ref={waveformRef} className="overflow-x-auto rounded bg-zinc-800" />
+      <VideoSegmentsTimeline videoRef={videoRef} start={cacheStart} end={cacheEnd} regions={regions} onRegionUpdated={updateRegion} disabled={applying} label="Walking and turning intervals" />
       <div className="mt-2 text-xs">Blue/green: walking intervals · Red: {metadata?.transition_guard_seconds > 0 ? 'saved padded turn intervals — redetect to update' : 'estimated turns (no added time margin)'}</div>
       <div className="mt-3 flex items-center gap-3 overflow-x-auto">
         {input('Walking start', walking.start, cacheStart, turns[0]?.start ?? walking.end, value => setWalking({ ...walking, start: value }))}
