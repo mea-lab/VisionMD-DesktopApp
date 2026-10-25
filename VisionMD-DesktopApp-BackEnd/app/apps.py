@@ -3,6 +3,7 @@
 import os
 from django.apps import AppConfig
 
+os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 os.environ.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 os.environ.setdefault("TF_FORCE_GPU_ALLOW_GROWTH", "true")

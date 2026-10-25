@@ -1,4 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
+import { editTaskBox } from '../../pages/TaskSelection/taskBoundingBox';
+import { landmarkDisplayColor } from './landmarkColor';
 
 const ResizeHandles = ({ x, y, width, height, onResize, item, index, handleSize = 12.5, strokeThickness }) => {
   const handles = [
@@ -88,10 +90,12 @@ const InteractiveOverlays = ({
     if (!video) return;
     let frameCallbackId;
     const updateFrame = (now, metadata) => {
-      const frame = Math.round(metadata.mediaTime * fps);
+      const landmarkFps = tasks[selectedTask]?.data?.landmark_fps ?? fps;
+      const frame = Math.round(metadata.mediaTime * landmarkFps);
       // console.log("Interactive frame: " + frame)
       setCurrentFrame(frame);
-      const offset = Math.round((tasks[selectedTask]?.start ?? 0) * fps);
+      const offset = tasks[selectedTask]?.data?.landmark_start_frame
+        ?? Math.round((tasks[selectedTask]?.start ?? 0) * landmarkFps);
       setLandMarkIndex(frame - offset);
       frameCallbackId = video.requestVideoFrameCallback(updateFrame);
     };
@@ -101,7 +105,10 @@ const InteractiveOverlays = ({
         video.cancelVideoFrameCallback(frameCallbackId);
       }
     };
-  }, [videoRef, fps, isPlaying, selectedTask]);
+  // Recreate the frame callback when cached re-analysis changes the task
+  // window.  The landmark array is then cropped to the new start time, so a
+  // callback closed over the old task range would draw the wrong frame.
+  }, [videoRef, fps, isPlaying, selectedTask, tasks]);
 
   const getSVGPoint = (evt) => {
     const svg = svgRef.current;
@@ -157,7 +164,7 @@ const InteractiveOverlays = ({
     }
     setTasks((prevBoxes) =>
       prevBoxes.map((task, idx) =>
-        idx === taskIndex ? { ...task, x: newX, y: newY, box_width: newWidth, box_height: newHeight } : task
+        idx === taskIndex ? editTaskBox(task, { x: newX, y: newY, box_width: newWidth, box_height: newHeight }) : task
       )
     );
   };
@@ -193,7 +200,7 @@ const InteractiveOverlays = ({
     const newY = initialY + dy;
     setTasks((prevBoxes) =>
       prevBoxes.map((task, idx) =>
-        idx === draggingTaskRef.current?.taskIndex?  { ...task, x: newX, y: newY } : task
+        idx === draggingTaskRef.current?.taskIndex?  editTaskBox(task, { x: newX, y: newY }) : task
       )
     );
   };
@@ -209,10 +216,9 @@ const InteractiveOverlays = ({
     e.stopPropagation();
     e.preventDefault();
     const svgPoint = getSVGPoint(e);
-    const taskBox = tasks[selectedTask];
     const currentLandmark = tasks[selectedTask].data.landMarks[landMarkIndex][landmarkIdx];
-    const circleCenterX = currentLandmark[0] + taskBox.x;
-    const circleCenterY = currentLandmark[1] + taskBox.y;
+    const circleCenterX = currentLandmark[0];
+    const circleCenterY = currentLandmark[1];
     const offsetX = svgPoint.x - circleCenterX;
     const offsetY = svgPoint.y - circleCenterY;
     draggingLandmarkRef.current = { landmarkIdx, offsetX, offsetY };
@@ -224,18 +230,17 @@ const InteractiveOverlays = ({
     if (!draggingLandmarkRef.current) return;
     const svgPoint = getSVGPoint(e);
     const { landmarkIdx, offsetX, offsetY } = draggingLandmarkRef.current;
-    const taskBox = tasks[selectedTask];
     const newCircleCenterX = svgPoint.x - offsetX;
     const newCircleCenterY = svgPoint.y - offsetY;
-    const newRelativeX = newCircleCenterX - taskBox.x;
-    const newRelativeY = newCircleCenterY - taskBox.y;
+    const newX = newCircleCenterX;
+    const newY = newCircleCenterY;
     setTasks((prevTasks) => {
       const newTasks = [...prevTasks];
       const task = { ...newTasks[selectedTask] };
       const data = { ...task.data };
       const newLandmarks = data.landMarks.slice();
       const currentFrameLandmarks = newLandmarks[landMarkIndex].slice();
-      currentFrameLandmarks[landmarkIdx] = [newRelativeX, newRelativeY];
+      currentFrameLandmarks[landmarkIdx] = [newX, newY];
       newLandmarks[landMarkIndex] = currentFrameLandmarks;
       data.landMarks = newLandmarks;
       task.data = data;
@@ -265,8 +270,12 @@ const InteractiveOverlays = ({
         start_time: start,
         end_time: end,
         fps,
+        ...data,
         landmarks: updatedLandmarks,
-        ...data
+        persist_landmark_edits: true,
+        norm_strategy: tasksRef.current[selectedTask].norm_strategy
+          || data.normalization_strategy
+          || (currentTaskName.startsWith('Hand Movement') ? 'PALMSIZE' : 'INDEXSIZE')
       });
       console.log("Uploaded Json", JSON.parse(jsonData));
       const uploadData = new FormData();
@@ -388,15 +397,7 @@ const InteractiveOverlays = ({
             const colors3D = tasks[selectedTask].data.landmark_colors;
             return tasks[selectedTask].data.landMarks[landMarkIndex].map((point, idx) => {
               const [px, py] = point;
-              let fillColor = 'red';
-              if (
-                Array.isArray(colors3D) &&
-                colors3D[landMarkIndex] &&
-                Array.isArray(colors3D[landMarkIndex][idx])
-              ) {
-                const [r, g, b] = colors3D[landMarkIndex][idx];
-                fillColor = `rgb(${r}, ${g}, ${b})`;
-              }
+              const fillColor = landmarkDisplayColor(colors3D, landMarkIndex, idx);
               return (
                 <circle
                   key={`landmark-${idx}`}

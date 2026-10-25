@@ -6,6 +6,7 @@ import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
 import { useState } from 'react';
+import { useTheme } from '../../contexts/ThemeContext';
 
 export default function JSONUploadDialog({
   dialogOpen,
@@ -13,6 +14,8 @@ export default function JSONUploadDialog({
   handleJSONUpload,
   videoRef,
 }) {
+  const { theme } = useTheme();
+  const isLight = theme === 'light';
   const [fileError, setFileError] = useState('');
   const [jsonContent, setJSONContent] = useState(null);
 
@@ -174,7 +177,8 @@ export default function JSONUploadDialog({
       onClose={handleClose}
       PaperProps={{
         sx: {
-          backgroundColor: '#333338',
+          backgroundColor: isLight ? '#ffffff' : '#333338',
+          color: isLight ? '#18181b' : '#f4f4f5',
           borderRadius: 3,
           minWidth: 400,
         },

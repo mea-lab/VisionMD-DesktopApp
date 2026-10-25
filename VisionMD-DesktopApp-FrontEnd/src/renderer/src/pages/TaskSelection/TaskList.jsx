@@ -1,17 +1,17 @@
 //src/pages/TaskSelection/TaskList.jsx
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import isEqual from 'lodash/isEqual';
 import { taskOptions } from '../../constants/taskOptions'; 
 import Default from './Tasks/default'
 
+const taskSelectionLoaders = import.meta.glob('./Tasks/*.jsx');
 const selectedTaskFiles = Object.fromEntries(
   taskOptions.map(({ value }) => {
     const fileName = value.toLowerCase().replace(/\s+/g, '_');
-    const module = import.meta.glob('./Tasks/*.jsx', { eager: true });
-    const match = Object.entries(module).find(([path]) =>
+    const match = Object.entries(taskSelectionLoaders).find(([path]) =>
       path.endsWith(`/${fileName}.jsx`)
     );
-    return [value, match ? match[1].default : null];
+    return [value, match ? lazy(match[1]) : null];
   }).filter(([_, component]) => component)
 );
 
@@ -38,7 +38,22 @@ const TaskList = ({
     if (isEqual(task?.[fieldName], value)) {
       return;
     }
-    onTaskChange({ id: task.id, [fieldName]: value, data: null });
+    const changingWindow = fieldName === 'start' || fieldName === 'end';
+    onTaskChange({
+      id: task.id,
+      [fieldName]: value,
+      // A manually edited boundary is no longer the full-video selection.
+      ...(changingWindow && task.full_video
+        ? {
+            full_video: false,
+            manual_range: {
+              start: fieldName === 'start' ? value : task.start,
+              end: fieldName === 'end' ? value : task.end,
+            },
+          }
+        : {}),
+      data: null,
+    });
   };
 
   const onTimeMark = (fieldName, task) => {
@@ -46,6 +61,12 @@ const TaskList = ({
     newTask[fieldName] = Number(
       Number(videoRef.current?.currentTime || 0).toFixed(3),
     );
+    // Marking a boundary manually turns a full-video task back into a custom range.
+    if (task.full_video) {
+      newTask.full_video = false;
+      newTask.manual_range = { start: newTask.start, end: newTask.end };
+    }
+    newTask.data = null;
     onTaskChange(newTask);
   };
 
@@ -72,8 +93,8 @@ const TaskList = ({
             
               if (!TaskComponent) {
                 return (
+                  <div key={task.id}>
                   <Default
-                    key={task.id}
                     task={task}
                     taskTypeIndex={taskTypeIndex}
                     onFieldChange={onFieldChange}
@@ -87,14 +108,16 @@ const TaskList = ({
                       setTaskTypeData(prev => ({
                         ...prev,
                         [task.name]: { ...prev[task.name], ...updates }
-                      }))
+                    }))
                     }
                   />
+                  </div>
                 );
               } else {
                 return (
-                  <TaskComponent
-                    key={task.id}
+                  <div key={task.id}>
+                  <Suspense fallback={<div className="p-4 text-gray-400">Loading task controls…</div>}>
+                    <TaskComponent
                     task={task}
                     taskTypeIndex={taskTypeIndex}
                     onFieldChange={onFieldChange}
@@ -108,9 +131,11 @@ const TaskList = ({
                       setTaskTypeData(prev => ({
                         ...prev,
                         [task.name]: { ...prev[task.name], ...updates }
-                      }))
+                    }))
                     }
-                  />
+                    />
+                  </Suspense>
+                  </div>
                 );
               }
             });

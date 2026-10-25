@@ -7,9 +7,8 @@ def video_reader(filename: str, batch_size: int = 8, width: int | None = None):
     """
     Read a video file and yield frames in batches.
 
-    In theory, tensorflow_io has tools for this but they don't seem to work for me. That
-    is probably more efficient if it works as they can prefetch. This also will optionally
-    downsample the video if compute is a limit.
+    Frames are decoded with OpenCV in bounded batches. This also optionally
+    downsamples the video when compute is limited.
 
     Args:
         filename: (str) The path to the video file.

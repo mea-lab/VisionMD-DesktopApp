@@ -7,8 +7,60 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
     'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
     sans-serif;
+  background: #27272a;
+  color: #f4f4f5;
+  color-scheme: dark;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* VisionMD historically used fixed dark Tailwind colors throughout. These
+   overrides provide one application-wide light palette without changing the
+   video pixels, plots, semantic status colors, or analysis results. */
+html.light body {
+  background: #f4f4f5;
+  color: #18181b;
+  color-scheme: light;
+}
+
+html.light .bg-zinc-900 { background-color: #e4e4e7 !important; }
+html.light .bg-zinc-800,
+html.light .bg-surface { background-color: #f4f4f5 !important; }
+html.light .bg-zinc-700,
+html.light .bg-surfaceElevated,
+html.light [class~="bg-[#333338]"] { background-color: #ffffff !important; }
+html.light .bg-zinc-600 { background-color: #f4f4f5 !important; }
+html.light .hover\:bg-zinc-700:hover,
+html.light .hover\:bg-gray-700:hover { background-color: #e4e4e7 !important; }
+html.light .hover\:bg-zinc-600:hover { background-color: #d4d4d8 !important; }
+
+html.light .text-gray-100,
+html.light .text-white { color: #18181b !important; }
+html.light .text-gray-200 { color: #27272a !important; }
+html.light .text-gray-300,
+html.light .text-gray-400 { color: #52525b !important; }
+html.light .text-blue-200 { color: #1d4ed8 !important; }
+html.light .border-zinc-500,
+html.light .border-zinc-600,
+html.light .border-l-zinc-600 { border-color: #a1a1aa !important; }
+
+html.light input,
+html.light select,
+html.light textarea {
+  background-color: #ffffff;
+  color: #18181b;
+}
+
+html.light .bg-blue-600,
+html.light .bg-red-600,
+html.light .bg-red-700,
+html.light .bg-green-600 {
+  color: #ffffff !important;
+}
+
+body, .bg-zinc-900, .bg-zinc-800, .bg-zinc-700, .bg-zinc-600,
+.bg-surface, .bg-surfaceElevated {
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
 }
 
 code {

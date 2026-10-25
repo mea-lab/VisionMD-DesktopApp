@@ -19,6 +19,8 @@ import CloudDownloadIcon from '@mui/icons-material/CloudDownload';
 import ArrowDropDownIcon from '@mui/icons-material/ArrowDropDown';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
+import AnalysisQualityBadge from '../../components/AnalysisQualityBadge';
+import { runAnalysisJob } from '../../utils/analysisJobs';
 
 const TaskDetails = () => {
   const {
@@ -33,6 +35,7 @@ const TaskDetails = () => {
     boundingBoxes,
     setBoundingBoxes,
     fps,
+    frameCount,
     tasks,
     setTasks,
     persons,
@@ -45,6 +48,7 @@ const TaskDetails = () => {
   const [TaskModule, setTaskModule] = useState(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [taskErrors, setTaskErrors] = useState({});
+  const [analysisJobs, setAnalysisJobs] = useState({});
   const dropdownRef = useRef(null);
 
   useEffect(() => {
@@ -111,6 +115,15 @@ const TaskDetails = () => {
     });
   };
 
+  const reanalyzePsWithWilor = () => {
+    const taskId = tasks?.[selectedTask]?.id;
+    if (taskId == null) return;
+    setTasks(previous => previous.map(task => task.id === taskId
+      ? { ...task, ps_method: 'wilor', data: null }
+      : task));
+    window.setTimeout(() => setOpenJsonUpload(true), 0);
+  };
+
   
   const clearTaskError = (taskId) => {
     setTaskErrors(prev => {
@@ -121,8 +134,6 @@ const TaskDetails = () => {
 
   const autoAnalyzeTask = async taskId => {
     try {
-      const videoURL = videoRef.current.src;
-      const videoBlob = await fetch(videoURL).then(r => r.blob());
       const taskData = tasks.find(t => t.id === taskId);
       if (!taskData) throw new Error(`Task with id ${taskId} not found`);
 
@@ -151,10 +162,6 @@ const TaskDetails = () => {
       };
       jsonData = JSON.stringify(jsonData);
 
-      const form = new FormData();
-      form.append("video", videoBlob);
-      form.append("json_data", jsonData);
-
       const sanitizedTaskName = name
         .replace(/[^a-zA-Z0-9]+/g, " ")
         .split(" ")
@@ -162,15 +169,12 @@ const TaskDetails = () => {
         .map(w => w.toLowerCase())
         .join("_");
 
-      const apiURL = `http://localhost:8000/api/${sanitizedTaskName}/?id=${videoId}`;
-
-      const res = await fetch(apiURL, { method: "POST", body: form });
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        throw new Error(`${name} failed (${res.status})${text ? `: ${text}` : ""}`);
-      }
-
-      const result = await res.json();
+      const result = await runAnalysisJob({
+        taskName: sanitizedTaskName,
+        videoId,
+        jsonData,
+        onUpdate: job => setAnalysisJobs(previous => ({ ...previous, [taskId]: job })),
+      });
       const safeFileName = fileName.replace(/\.[^/.]+$/, "");
 
       setTasks(prev =>
@@ -185,6 +189,10 @@ const TaskDetails = () => {
         const { [taskId]: _remove, ...rest } = prev;
         return rest;
       });
+      setAnalysisJobs(previous => {
+        const { [taskId]: _done, ...rest } = previous;
+        return rest;
+      });
 
       return true;
     } catch (err) {
@@ -193,6 +201,10 @@ const TaskDetails = () => {
         ...prev,
         [taskId]: err?.message || "Unknown error",
       }));
+      setAnalysisJobs(previous => {
+        const { [taskId]: _done, ...rest } = previous;
+        return rest;
+      });
       return false;
     }
   };
@@ -262,6 +274,7 @@ const TaskDetails = () => {
             boundingBoxes={boundingBoxes}
             setBoundingBoxes={setBoundingBoxes}
             fps={fps}
+            frameCount={frameCount}
             persons={persons}
             setVideoReady={setVideoReady}
             setVideoData={setVideoData}
@@ -297,6 +310,14 @@ const TaskDetails = () => {
                 </option>
               ))}
             </select>
+
+            <AnalysisQualityBadge quality={currentTask?.data?.analysisQuality} />
+            {currentTask?.data?.psPipeline?.engine === 'mediapipe_world_landmarks' && (
+              <button className={btn} onClick={reanalyzePsWithWilor}
+                title="Discard the provisional MediaPipe result and run the full YOLO + WiLoR pipeline">
+                Reanalyze with WiLoR
+              </button>
+            )}
 
             {/* Reset */}
             <button className={btn} onClick={resetTask}>
@@ -344,6 +365,7 @@ const TaskDetails = () => {
 
             {/* Analyze All */}
             <button
+              data-shortcut-action="analyze-all"
               className={btn}
               onClick={analyzeAllTasks}
               disabled={analyzingAll || !tasks.some(t => t.data == null)}
@@ -352,11 +374,22 @@ const TaskDetails = () => {
             </button>
           </div>
 
+          {currentTask?.data?.psPipeline?.engine === 'yolo_wilor'
+            && currentTask?.data?.psPipeline?.screening?.accepted === false && (
+            <div className="mx-10 mb-3 rounded-md border border-amber-500 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              MediaPipe screening was not reliable for this video. VisionMD automatically
+              completed the analysis with YOLO + WiLoR.
+              {currentTask.data.psPipeline.screening.reasons?.length > 0
+                ? ` Reason: ${currentTask.data.psPipeline.screening.reasons.join('; ')}` : ''}
+            </div>
+          )}
+
           <div className="flex-1 py-4 px-10 overflow-y-auto text-gray-100">
             {currentTaskError ? (
               <div className="flex justify-center items-center h-full flex-col gap-4">
                 <div> Analyze the task </div>
                 <button
+                  data-shortcut-action="analyze"
                   className={`${btn} text-base`}
                   onClick={() => {
                     clearTaskError(currentTaskId);
@@ -388,13 +421,20 @@ const TaskDetails = () => {
               )
             ) : analyzingAll ? (
               <div className="flex justify-center items-center h-full flex-col gap-4">
-                <div>Analyzing task...</div>
+                <div>
+                  {analysisJobs[currentTaskId]?.status === 'queued'
+                    ? 'Analysis queued…'
+                    : (Number.isFinite(analysisJobs[currentTaskId]?.progress)
+                      ? `Analyzing task… ${analysisJobs[currentTaskId].progress}%`
+                      : 'Analyzing task…')}
+                </div>
                 <CircularProgress size={64} sx={{ color: '#2563eb' }} />
               </div>
             ) : (
               <div className="flex justify-center items-center h-full flex-col gap-4">
                 <div>Analyze the task</div>
                 <button
+                  data-shortcut-action="analyze"
                   className={`${btn} text-base`}
                   onClick={() => setOpenJsonUpload(true)}
                 >

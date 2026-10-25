@@ -9,6 +9,23 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def add_exact_frame_count(project_data, project_path):
+    """Add decoded video frame count, including for projects uploaded earlier."""
+    metadata = project_data.get("metadata")
+    if not isinstance(metadata, dict) or metadata.get("frame_count"):
+        return
+    video_name = metadata.get("video_name")
+    if not video_name:
+        return
+    cap = cv2.VideoCapture(os.path.join(project_path, video_name))
+    try:
+        if cap.isOpened():
+            count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            if count > 0:
+                metadata["frame_count"] = count
+    finally:
+        cap.release()
+
 def verify_project_folder(project_path):
     try:
         if not os.path.isdir(project_path):
@@ -111,6 +128,7 @@ def get_video_data(request):
                 shutil.rmtree(project_path, ignore_errors=True)
                 return Response(f"Video project data corrupted | {e}", status=404)
             
+        add_exact_frame_count(project_data, project_path)
         return Response(project_data, status=200)
         
 
@@ -147,6 +165,7 @@ def get_video_data(request):
                 continue
         
         if project_data:
+            add_exact_frame_count(project_data, project_path)
             all_project_data.append(project_data)
 
     all_project_data.sort(

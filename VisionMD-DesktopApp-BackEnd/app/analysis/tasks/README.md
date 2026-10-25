@@ -547,44 +547,92 @@ class HeadNoddingTask(BaseTask):
                 return float(np.mean(distances)) if distances else 1.0
 ```
 
-## Testing Your Task
+## Adding a task to VisionMD today
 
-Once you’ve added your new `<your_task_name>.py` file under **`analysis/tasks/`**, the system will automatically:
+The backend route is discovered automatically, but adding a Python file alone
+does **not** make a task available in the application.  A complete task has a
+backend implementation and two frontend views.
 
-- **Discover** it (no edits to `__init__.py` required)  
-- **Generate** a POST endpoint at  
-  ```
-  /api/tasks/<your_task_name>/
-  ```
+### 1. Use one canonical name
 
-### How to test
+For example, the display name `Hand Pronation Right` must map consistently to:
 
-1. **Start (or restart)** your Django server:  
-   ```bash
-   python manage.py runserver
-   ```
-2. **POST** to your task’s URL  
-   ```
-   POST http://<host>:<port>/api/tasks/<your_task_name>/
-   ```
-   - **Form field** `"json_data"` (stringified JSON):  
-     ```json
-     {
-       "boundingBox": { "x": 120, "y": 80, "width": 400, "height": 600 },
-       "start_time": 0.0,
-       "end_time": 8.0
-     }
-     ```
-   - **Form field** `"video"`: your `.mp4` file
-3. **Inspect** the JSON response in your client—e.g.:  
-   ```json
-   {
-     "peaks": [...],
-     "frequency_hz": 1.6,
-     "amplitude_norm": 0.83,
-     "landMarks": [[...], ...],
-     "normalization_factor": 212.5
-   }
-   ```
+| Purpose | Required value |
+| --- | --- |
+| Backend module | `app/analysis/tasks/hand_pronation_right.py` |
+| Backend class | `HandPronationRightTask` |
+| Generated POST endpoint | `/api/hand_pronation_right/` |
+| Task-selection component | `pages/TaskSelection/Tasks/hand_pronation_right.jsx` |
+| Result component | `pages/TaskDetails/Tasks/hand_pronation_right.jsx` |
 
-No manual URL or registration steps are needed—just drop in the file, restart, and your task is live!
+Use letters and spaces in the display name.  The task loader derives its
+module and class names from it, so punctuation or inconsistent capitalization
+can make first-pass analysis work but break cached re-analysis.
+
+### 2. Implement the backend task
+
+Create the task module under `app/analysis/tasks/` and subclass `BaseTask`.
+At minimum, implement:
+
+- `__init__` and `prepare_video_parameters`;
+- `get_detector` and `get_signal_analyzer`;
+- `extract_landmarks`, `calculate_signal`, and
+  `calculate_normalization_factor`; and
+- `api_response`, returning the standard result payload.
+
+The request is a multipart POST.  VisionMD has already stored the video under
+`MEDIA_ROOT/video_uploads/<project-id>/`; `json_data` supplies `task_name`,
+`boundingBox`, `start_time`, `end_time`, and `norm_strategy`.
+
+The normal response contract includes `linePlot`, `velocityPlot`, `rawData`,
+cycle points and `radarTable`, plus:
+
+```json
+{
+  "landMarks": "essential landmarks used to recalculate the signal",
+  "allLandMarks": "complete landmarks used for normalization or display",
+  "normalization_factor": 1.0
+}
+```
+
+`landMarks` are also drawn on the video and saved into project JSON.  Preserve
+their first two values as display x/y coordinates.  If a task needs additional
+signal-only data, it may append values after x/y, as the P/S task does for its
+MediaPipe world coordinates.
+
+Concrete task modules receive routes automatically in
+`app/views/create_task_views.py` after a Django-server restart.  Modules whose
+name begins with `_` are private shared helpers and deliberately do not receive
+a route.
+
+### 3. Register the frontend task
+
+Add the display option to
+`VisionMD-DesktopApp-FrontEnd/src/renderer/src/constants/taskOptions.jsx` and
+create both JSX files named by the lowercase, underscore-separated task name.
+The startup check intentionally fails if either view is absent.
+
+The selection view owns task-specific settings and the result view usually
+wraps `WavePlotEditable` and `ScatterPlot`.  Copy a close existing task rather
+than bypassing those components: they support frame/landmark interaction,
+manual cycle editing, JSON saving, and cached re-analysis.
+
+### 4. Test the entire workflow
+
+1. Run `python manage.py check` and restart Django so its generated URLs are
+   rebuilt.
+2. Run the frontend build.
+3. In VisionMD, select the task, set a subject and time range, and analyze.
+4. Confirm landmarks stay aligned while the video plays, the waveform contains
+   the expected signal, and the feature table appears.
+5. Save/download JSON, reload it, alter a cycle, and alter an allowed analysis
+   subrange.  These actions must use cached landmarks rather than run detection
+   again.
+
+`HandPronationLeftTask` and `HandPronationRightTask` are reference examples
+for a task that needs a 3-D signal but ordinary 2-D landmark visualization.
+They use the vendored WiLoR Mini implementation in
+`app/analysis/models/wilor_mini/`. Its ~2.6 GB checkpoint is intentionally
+ignored by Git. On first P/S use WiLoR downloads the official checkpoint into
+`wilor_mini/pretrained_models/`; a managed installation can instead set
+`VISIONMD_WILOR_MODEL_DIR` to a pre-populated model directory.

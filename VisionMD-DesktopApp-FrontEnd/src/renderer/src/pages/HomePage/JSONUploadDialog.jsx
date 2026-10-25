@@ -5,6 +5,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import CloseIcon from '@mui/icons-material/Close';
+import { useTheme } from '../../contexts/ThemeContext';
 
 const JSONUploadDialog = ({
   dialogOpen,
@@ -12,6 +13,8 @@ const JSONUploadDialog = ({
   uploadError,
   setUploadError,
 }) => {
+  const { theme } = useTheme();
+  const isLight = theme === 'light';
 
   const handleClose = () => {
     setDialogOpen(false);
@@ -24,7 +27,8 @@ const JSONUploadDialog = ({
       onClose={handleClose}
       PaperProps={{
         sx: {
-          backgroundColor: '#333338',
+          backgroundColor: isLight ? '#ffffff' : '#333338',
+          color: isLight ? '#18181b' : '#f4f4f5',
           borderRadius: 3,
           minWidth: 400,
         },

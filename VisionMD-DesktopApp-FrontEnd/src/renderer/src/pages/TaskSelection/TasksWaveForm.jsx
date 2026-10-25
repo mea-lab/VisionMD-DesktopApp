@@ -10,13 +10,18 @@ const TasksWaveForm = ({
   fps,
   onTaskCreate,
   onTaskChange,
+  onTasksReplace,
   isVideoReady,
 }) => {
   const waveformRef = useRef(null);
   const waveSurferRef = useRef(null);
   const regionsPluginRef = useRef(null);
+  const previewMediaRef = useRef(null);
   const ignoreRef = useRef(false);
   const tasksRef = useRef(tasks);
+  // This is deliberately page-local: leaving Task Selection discards the
+  // temporary manual regions, while the chosen full-video task is persisted.
+  const manualTasksBeforeFullVideoRef = useRef(null);
 
   const [waveSurferReady, setWaveSurferReady] = useState(false);
   const [loadPercent, setLoadPercent] = useState(0)
@@ -35,6 +40,13 @@ const TasksWaveForm = ({
       waveSurferRef.current = null;
     }
 
+    // Keep waveform decoding isolated from the shared review video.  Binding
+    // WaveSurfer to that element made video.duration grow during playback and
+    // caused task/landmark frame indices to drift.
+    const previewMedia = new Audio(videoRef.current.currentSrc || videoRef.current.src);
+    previewMedia.muted = true;
+    previewMediaRef.current = previewMedia;
+
     const ws = WaveSurfer.create({
       container: waveformRef.current,
       waveColor: '#1976d2',
@@ -47,7 +59,7 @@ const TasksWaveForm = ({
       minPxPerSec: 100,
       autoScroll: true,
       normalize: true,
-      media: videoRef.current,
+      media: previewMedia,
     });
 
     waveSurferRef.current = ws;
@@ -65,6 +77,21 @@ const TasksWaveForm = ({
       setWaveSurferReady(true);
       setWaveLoading(false);
     });
+
+    ws.on('interaction', time => {
+      if (videoRef.current) videoRef.current.currentTime = time;
+    });
+
+    // Keep the independently decoded waveform visually synchronized with the
+    // review video.  This preserves the moving playback bar without letting
+    // WaveSurfer own or reload the shared <video> element.
+    const syncWaveformToVideo = () => {
+      const video = videoRef.current;
+      if (!video || !Number.isFinite(video.currentTime)) return;
+      ws.setTime(video.currentTime);
+    };
+    videoRef.current.addEventListener('timeupdate', syncWaveformToVideo);
+    videoRef.current.addEventListener('seeked', syncWaveformToVideo);
 
 
     regionsPluginRef.current.on('region-created', region => {
@@ -112,6 +139,9 @@ const TasksWaveForm = ({
         ...original,
         start,
         end,
+        // Dragging a region is a manual range choice, not a full-video task.
+        full_video: false,
+        manual_range: { start, end },
         data: null,
       };
 
@@ -124,7 +154,13 @@ const TasksWaveForm = ({
     });
 
     return () => {
+      videoRef.current?.removeEventListener('timeupdate', syncWaveformToVideo);
+      videoRef.current?.removeEventListener('seeked', syncWaveformToVideo);
       ws.destroy();
+      previewMedia.pause();
+      previewMedia.removeAttribute('src');
+      previewMedia.load();
+      previewMediaRef.current = null;
       waveSurferRef.current = null;
       regionsPluginRef.current = null;
       setWaveSurferReady(false);
@@ -164,6 +200,33 @@ const TasksWaveForm = ({
     waveSurferRef.current.zoom((670 / duration) * zoom);
   };
 
+  const hasFullVideoTask =
+    tasks.length === 1 && Boolean(tasks[0]?.full_video);
+
+  const handleFullVideoChange = useFullVideo => {
+    const duration = Number(videoRef.current?.duration);
+    if (!Number.isFinite(duration) || duration <= 0) return;
+
+    if (useFullVideo) {
+      manualTasksBeforeFullVideoRef.current = tasks.map(task => ({ ...task }));
+      const preservedId = tasks[0]?.id ?? 1;
+      onTasksReplace([{
+        id: preservedId,
+        start: 0,
+        end: Number(duration.toFixed(3)),
+        name: 'Region',
+        full_video: true,
+        data: null,
+      }]);
+      return;
+    }
+
+    if (manualTasksBeforeFullVideoRef.current) {
+      onTasksReplace(manualTasksBeforeFullVideoRef.current);
+      manualTasksBeforeFullVideoRef.current = null;
+    }
+  };
+
   return (
     <div className="flex flex-col justify-center items-center w-full pt-6 p-2">
       <div className="flex flex-col w-full p-4 rounded-lg bg-[#333338]">
@@ -190,6 +253,21 @@ const TasksWaveForm = ({
           className="w-full py-2 bg-zinc-700 overflow-x-auto"
           ref={waveformRef}
         />
+        <div className="flex justify-end pt-2 pr-1">
+          <label
+            className="inline-flex items-center gap-1.5 text-xs text-gray-100 cursor-pointer"
+            title="Replace all regions with one task spanning the complete video"
+          >
+            <input
+              type="checkbox"
+              className="h-3.5 w-3.5 accent-blue-600"
+              checked={hasFullVideoTask}
+              disabled={!Number.isFinite(Number(videoRef.current?.duration))}
+              onChange={event => handleFullVideoChange(event.target.checked)}
+            />
+            Full video
+          </label>
+        </div>
       </div>
     </div>
   );

@@ -1,6 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Plot from 'react-plotly.js';
 import Button from '@mui/material/Button';
+import AnalysisRangePanel from '../AnalysisRangePanel';
+import { useTheme } from '../../../contexts/ThemeContext';
 
 const WavePlotEditable = ({
   selectedTaskIndex,
@@ -11,6 +13,8 @@ const WavePlotEditable = ({
   endTime,
   handleJSONUpload,
 }) => {
+  const { theme } = useTheme();
+  const light = theme === 'light';
   const [currentData, setCurrentData] = useState(tasks?.[selectedTaskIndex]?.data);
 
   useEffect(() => {
@@ -46,6 +50,9 @@ const WavePlotEditable = ({
 
   const [selectedPoint, setSelectedPoint] = useState({});
   const [isKeyDown, setIsKeyDown] = useState(false);
+  const [showAnalysisRange, setShowAnalysisRange] = useState(false);
+  const [reanalysing, setReanalysing] = useState(false);
+  const [rangeError, setRangeError] = useState('');
 
   const plotRef = useRef(null);
 
@@ -57,6 +64,37 @@ const WavePlotEditable = ({
       data: updatedData,
     };
     setTasks(updatedTasks);
+  };
+
+  const applyCachedAnalysisRange = async (range, normStrategy) => {
+    const task = tasks[selectedTaskIndex];
+    const cache = currentData.analysis_cache || {
+      start_time: task.start,
+      end_time: task.end,
+      // Older VisionMD JSON files did not persist cache metadata.  Landmark
+      // arrays contain one entry per source video frame, so derive the source
+      // FPS for backward-compatible cached re-analysis.
+      fps: currentData.landMarks?.length / Math.max(task.end - task.start, Number.EPSILON),
+      landmark_start_frame: currentData.landmark_start_frame,
+      landMarks: currentData.landMarks,
+      allLandMarks: currentData.allLandMarks,
+    };
+    setReanalysing(true); setRangeError('');
+    try {
+      const form = new FormData();
+      form.append('json_data', JSON.stringify({
+        task_name: task.name, start_time: range.start, end_time: range.end,
+        fps: cache.fps, norm_strategy: normStrategy, analysis_cache: cache,
+      }));
+      const response = await fetch('http://localhost:8000/api/update_landmarks/', { method: 'POST', body: form });
+      if (!response.ok) throw new Error(await response.text());
+      const data = await response.json();
+      setTasks(previous => previous.map((item, index) => index === selectedTaskIndex
+        ? { ...item, start: range.start, end: range.end, norm_strategy: normStrategy, data }
+        : item));
+      setShowAnalysisRange(false);
+    } catch (error) { setRangeError(error.message || 'Could not re-analyze from cached landmarks.'); }
+    finally { setReanalysing(false); }
   };
 
   // ------------------ Video event handlers ------------------
@@ -481,6 +519,27 @@ const WavePlotEditable = ({
     <div
       className="relative flex flex-col items-center pr-8 pl-8 pb-8"
     >
+      <div className="w-full max-w-5xl mb-3">
+        <button
+          className="w-full rounded-lg border border-zinc-600 bg-zinc-700 px-4 py-2 text-left text-sm font-semibold text-gray-100 hover:bg-zinc-600"
+          onClick={() => setShowAnalysisRange(open => !open)}
+        >
+          {showAnalysisRange ? '▾' : '▸'} Analysis range & normalization
+        </button>
+        {showAnalysisRange && (
+          <AnalysisRangePanel
+            videoRef={videoRef}
+            cacheStart={Number((currentData.analysis_cache || { start_time: startTime }).start_time)}
+            cacheEnd={Number((currentData.analysis_cache || { end_time: endTime }).end_time)}
+            start={startTime}
+            end={endTime}
+            normStrategy={tasks[selectedTaskIndex]?.norm_strategy}
+            onApply={applyCachedAnalysisRange}
+          />
+        )}
+        {reanalysing && <div className="mt-2 text-sm text-blue-200">Recalculating from cached landmarks…</div>}
+        {rangeError && <div className="mt-2 text-sm text-red-300">{rangeError}</div>}
+      </div>
       <div
         className="w-full max-w-5xl p-4 bg-[#333338] rounded-xl"
         style={{ minHeight: '400px' }}
@@ -571,18 +630,18 @@ const WavePlotEditable = ({
             },
           }}
           layout={{
-            plot_bgcolor: '#39393F',
-            paper_bgcolor: '#333338',
+            plot_bgcolor: light ? '#ffffff' : '#39393F',
+            paper_bgcolor: light ? '#ffffff' : '#333338',
             shapes,
             dragmode: 'pan',
             xaxis: {
               title: {
                 text: 'Time [s]',
                 standoff: 20,
-                font: { color: '#f6f3f3ff' },
+                font: { color: light ? '#18181b' : '#f6f3f3ff' },
               },
-              gridcolor: '#3F3F46',
-              tickfont: { color: '#f3f4f6' },
+              gridcolor: light ? '#d4d4d8' : '#3F3F46',
+              tickfont: { color: light ? '#27272a' : '#f3f4f6' },
               range: [startTime, endTime],
               fixedrange: false,
             },
@@ -590,10 +649,10 @@ const WavePlotEditable = ({
               title: {
                 text: 'Distance',
                 standoff: 20,
-                font: { color: '#f3f4f6' },
+                font: { color: light ? '#18181b' : '#f3f4f6' },
               },
-              gridcolor: '#3F3F46',
-              tickfont: { color: '#f3f4f6' },
+              gridcolor: light ? '#d4d4d8' : '#3F3F46',
+              tickfont: { color: light ? '#27272a' : '#f3f4f6' },
               automargin: true,
               fixedrange: false,
             },
@@ -604,9 +663,9 @@ const WavePlotEditable = ({
               y: 1,
               xanchor: 'right',
               yanchor: 'top',
-              bgcolor: 'rgba(51, 51, 56, 0.8)',
+              bgcolor: light ? 'rgba(255,255,255,0.9)' : 'rgba(51, 51, 56, 0.8)',
               font: {
-                color: '#f3f4f6',
+                color: light ? '#18181b' : '#f3f4f6',
                 size: 12,
                 family: 'Arial, sans-serif',
               },

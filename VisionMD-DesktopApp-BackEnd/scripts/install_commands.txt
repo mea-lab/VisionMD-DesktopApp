@@ -2,10 +2,9 @@ pip install --upgrade pip
 
 LINUX GPU:
 pip install --no-cache-dir \
-  "tensorflow[and-cuda]==2.17.0" \
   protobuf==4.25.3 \
   numpy==1.26.4 \
-  tensorflow-hub==0.16.1 \
+  h5py==3.14.0 \
   scipy==1.15.3 \
   opencv-python==4.10.0.82 \
   mediapipe==0.10.21 \
@@ -16,10 +15,9 @@ pip install --no-cache-dir \
 
 LINUX CPU:
 pip install --no-cache-dir \
-  tensorflow==2.17.0 \
   protobuf==4.25.3 \
   numpy==1.26.4 \
-  tensorflow-hub==0.16.1 \
+  h5py==3.14.0 \
   scipy==1.15.3 \
   opencv-python==4.10.0.82 \
   mediapipe==0.10.21 \
@@ -31,10 +29,9 @@ pip install --no-cache-dir \
 
 MacOS CPU:
 pip install --no-cache-dir \
-  tensorflow==2.17.0 \
   protobuf==4.25.3 \
   numpy==1.26.4 \
-  tensorflow-hub==0.16.1 \
+  h5py==3.14.0 \
   scipy==1.15.3 \
   opencv-python==4.10.0.82 \
   mediapipe==0.10.21 \
@@ -46,10 +43,9 @@ pip install --no-cache-dir \
 
 WINDOWS CPU:
 pip install --no-cache-dir ^
-  tensorflow==2.17.0 ^
   protobuf==4.25.3 ^
   numpy==1.26.4 ^
-  tensorflow-hub==0.16.1 ^
+  h5py==3.14.0 ^
   scipy==1.15.3 ^
   opencv-python==4.10.0.82 ^
   mediapipe==0.10.21 ^
@@ -59,5 +55,5 @@ pip install --no-cache-dir ^
   torch torchvision torchaudio
 
 ALL OS:
-pip install --no-cache-dir django djangorestframework django-cors-headers pillow pyinstaller hachoir
+pip install --no-cache-dir django djangorestframework django-cors-headers pillow pyinstaller hachoir einops
 conda install -c conda-forge ffmpeg pymediainfo

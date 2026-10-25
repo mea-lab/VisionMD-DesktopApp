@@ -26,7 +26,29 @@ VisionMD-DesktopApp-BackEnd/app/analysis/models/
 
 Task files in `app/analysis/tasks/` are discovered dynamically. Adding a new task file following the existing `BaseTask` pattern creates a matching API endpoint.
 
-Current task implementations include finger tapping, hand movement, hand tremor, leg agility, toe tapping, and gait analysis.
+Current task implementations include finger tapping, hand movement, hand tremor,
+leg agility, toe tapping, gait, and left/right pronation-supination analysis.
+
+## Runtime behavior
+
+- Task analysis is submitted through `/api/analysis_jobs/<task>/` and executed
+  by one process-local worker. Serial GPU execution avoids VRAM contention while
+  the UI polls job status and remains responsive.
+- Expensive immutable model weights are reused within the backend process.
+  Ultralytics predictor/tracker state is reset between videos so identities and
+  frame geometry cannot leak from one project to another.
+- Results are cached by video identity/mtime, task, and canonical parameters.
+  Pass `force=1` to deliberately bypass the cache.
+- Every completed task includes `analysisRuntime` telemetry and an
+  `analysisQuality` badge payload (`good`, `review`, or `failed`). This is a
+  technical signal-quality screen, not a clinical validity determination.
+- See `app/analysis/tasks/PRONATION_SUPINATION_PIPELINE.md` for the MediaPipe
+  screening, automatic WiLoR fallback, temporal correction, and limitations.
+
+The standalone `batch_processing/batch_analyze.py` registry contains every
+desktop task. It writes ordinary result JSON plus a complete
+`*_visionmd_project.json` snapshot that can be imported with **Load Project
+JSON** on the Home screen.
 
 ## Prerequisites
 - Anaconda (or Miniconda)  
@@ -45,11 +67,18 @@ conda activate VisionMD
 ```
 
 ### 2. Download the models
-Download the models using the scripts found in `./scripts`. 
+The MeTRAbs PyTorch inference implementation is part of the repository. Its
+large checkpoint package is intentionally downloaded locally, rather than
+stored in Git. Download it once using the script for your platform:
+
 ```bash
 ./scripts/get_models.sh # For Linux / MacOS
 ./scripts/get_models.bat # For Windows
 ```
+
+The scripts create
+`app/analysis/models/metrabs_eff2l_384px_800k_28ds_pytorch/`. This directory
+is ignored by Git and must be present before a MeTRAbs-based analysis can run.
 
 ### 3. Start the Django Development Server
 

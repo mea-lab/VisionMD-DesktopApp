@@ -9,6 +9,7 @@ const VideoPlayer = ({
   videoURL,
   videoRef,
   fps,
+  frameCount,
   boundingBoxes,
   persons,
   setVideoReady,
@@ -29,8 +30,14 @@ const VideoPlayer = ({
   const [frameInput, setFrameInput] = useState(0);
   const [isEditing, setIsEditing] = useState(false);
   const [currentFrame, setCurrentFrame] = useState(0);
+  const [totalFrameCount, setTotalFrameCount] = useState(0);
 
-  const getFrameFromMediaTime = (time, fps) => Math.floor(time * fps + 1e-7)
+  // Follow the presented picture; the playback clock can advance during stalls.
+  const getFrameFromMediaTime = (time, rate) => {
+    const index = Math.max(0, Math.round(time * rate));
+    return frameCount > 0 ? Math.min(frameCount - 1, index) : index;
+  };
+
 
   useEffect(() => {
     if (!isEditing) {
@@ -42,21 +49,29 @@ const VideoPlayer = ({
     const video = videoRef.current;
     if (!video) return;
     let frameCallbackId;
+    let cancelled = false;
 
-    const updateFrameNumber = () => {
-      const video = videoRef.current;
-      if (!video) return;
-
-      const frameIdx = getFrameFromMediaTime(video.currentTime, fps);
+    const updateFrameNumber = (_now, metadata) => {
+      if (cancelled) return;
+      const frameIdx = getFrameFromMediaTime(metadata.mediaTime, fps);
       setCurrentFrame(frameIdx);
 
-      video.requestVideoFrameCallback(updateFrameNumber);
+      if (!cancelled) {
+        frameCallbackId = video.requestVideoFrameCallback(updateFrameNumber);
+      }
     };
 
     frameCallbackId = video.requestVideoFrameCallback(updateFrameNumber);
-  }, [videoRef, fps]);
+    return () => {
+      cancelled = true;
+      if (frameCallbackId != null && video.cancelVideoFrameCallback) {
+        video.cancelVideoFrameCallback(frameCallbackId);
+      }
+    };
+  }, [videoRef, videoURL, fps, frameCount]);
 
-  // Update container size on mount and on window resize.
+  // Observe the actual panel rather than only the browser window. Sidebars and
+  // task panes can resize without emitting a window resize event.
   const updateContainerSize = useCallback(() => {
     if (containerRef.current) {
       const rect = containerRef.current.getBoundingClientRect();
@@ -66,8 +81,13 @@ const VideoPlayer = ({
 
   useEffect(() => {
     updateContainerSize();
-    window.addEventListener('resize', updateContainerSize);
-    return () => window.removeEventListener('resize', updateContainerSize);
+    if (!containerRef.current || !window.ResizeObserver) {
+      window.addEventListener('resize', updateContainerSize);
+      return () => window.removeEventListener('resize', updateContainerSize);
+    }
+    const observer = new ResizeObserver(updateContainerSize);
+    observer.observe(containerRef.current);
+    return () => observer.disconnect();
   }, [updateContainerSize]);
 
   // Clamp panOffset when container size or zoomLevel changes.
@@ -105,12 +125,22 @@ const VideoPlayer = ({
     return () => vid.removeEventListener('timeupdate', handleUpdate);
   }, [selectedTask, videoRef]);
 
-  const getTotalFrameCount = () => {
-    if (videoRef.current && !isNaN(videoRef.current.duration)) {
-      return Math.ceil(videoRef.current.duration * fps - 1e-6);
+  const captureTotalFrameCount = () => {
+    if (Number.isFinite(frameCount) && frameCount > 0) {
+      setTotalFrameCount(frameCount);
+      return;
     }
-    return 0;
+    const duration = videoRef.current?.duration;
+    if (Number.isFinite(duration) && Number.isFinite(fps)) {
+      // Capture once when the browser reads video metadata.  Do not derive
+      // this during every render from a duration that media helpers can alter.
+      setTotalFrameCount(Math.round(duration * fps));
+    }
   };
+
+  useEffect(() => {
+    if (Number.isFinite(frameCount) && frameCount > 0) setTotalFrameCount(frameCount);
+  }, [frameCount]);
 
   // Pointer events for panning.
   const handlePointerDown = (e) => {
@@ -193,10 +223,13 @@ const VideoPlayer = ({
                 onFocus={() => setIsEditing(true)}
                 onBlur={() => {
                   setIsEditing(false);
-                  const newFrame = Number(frameInput);
+                  const newFrame = Math.max(0, Math.min(totalFrameCount - 1, Number(frameInput)));
                   if (!isNaN(newFrame) && videoRef.current) {
-                    videoRef.current.currentTime = newFrame / fps;
-                    setCurrentFrame(Math.floor(videoRef.current.currentTime * fps + 1e-7));
+                    // Seek inside the frame: rounded FPS can otherwise put an
+                    // exact-boundary seek a microsecond into the previous frame.
+                    videoRef.current.currentTime = (newFrame + 0.5) / fps;
+                    setCurrentFrame(newFrame);
+                    setFrameInput(newFrame);
                   }
                 }}
                 onKeyDown={(e) => {
@@ -204,7 +237,7 @@ const VideoPlayer = ({
                 }}
               />
               <span className="text-gray-100">/</span>
-              <span className="text-gray-100">{getTotalFrameCount()}</span>
+              <span className="text-gray-100">{totalFrameCount}</span>
             </div>
           </div>
           )}
@@ -223,16 +256,20 @@ const VideoPlayer = ({
             >
               <video
                 src={videoURL}
+                key={videoURL}
                 ref={videoRef}
                 preload="auto"
                 style={{
                   objectFit: 'contain',
                   width: '100%',
                   height: '100%',
-                  opacity: 0, //VIDEO ELEMENT NEEDS TO BE HIDDEN AS IT BUFFERS, VIDEO DRAWER WILL DRAW THE VIDEO FRAMES
+                  opacity: 1,
+                  transform: `scale(${zoomLevel}) translate(${panOffset.x / zoomLevel}px, ${panOffset.y / zoomLevel}px)`,
+                  transformOrigin: 'center center',
                 }}
                 onLoadedMetadata={() => {
                   setVideoReady(true);
+                  captureTotalFrameCount();
                   updateContainerSize();
                   setVideoDimensions({
                     width: videoRef.current.videoWidth,
@@ -241,6 +278,7 @@ const VideoPlayer = ({
                 }}
                 onPlay={() => setIsPlaying(true)}
                 onPause={() => setIsPlaying(false)}
+                onEnded={() => setIsPlaying(false)}
               />
               <VideoDrawer
                 videoRef={videoRef}
@@ -248,7 +286,6 @@ const VideoPlayer = ({
                 fps={fps}
                 persons={persons}
                 tasks={tasks}
-                landMarks={tasks[selectedTask]?.data?.landMarks}
                 selectedTask={selectedTask}
                 isPlaying={isPlaying}
                 screen={screen}

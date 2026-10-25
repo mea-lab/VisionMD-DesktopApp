@@ -4,6 +4,40 @@ import json, time
 import numpy as np
 import scipy.interpolate as interpolate
 
+# Keep the manual-edit schema aligned with PeakfinderSignalAnalyzer.get_output().
+STANDARD_FEATURE_KEYS = ("MeanAmplitude", "StdAmplitude", "MeanSpeed", "StdSpeed", "MeanRMSVelocity", "StdRMSVelocity", "MeanOpeningSpeed", "StdOpeningSpeed", "MeanClosingSpeed", "StdClosingSpeed", "MeanMaxOpeningSpeed", "StdMaxOpeningSpeed", "MeanMaxClosingSpeed", "StdMaxClosingSpeed", "MeanCycleDuration", "StdCycleDuration", "CVAmplitude", "CVSpeed", "CVRMSVelocity", "CVOpeningSpeed", "CVClosingSpeed", "CVMaxOpeningSpeed", "CVMaxClosingSpeed", "CVCycleDuration", "Frequency", "AmplitudeDecay", "VelocityDecay", "RangeCycleDuration", "NumberofPauses", "numberofHesitations")
+
+def _mean(values): return float(np.mean(values)) if len(values) else 0.0
+def _std(values): return float(np.std(values)) if len(values) else 0.0
+def _cv(values): return _std(values) / _mean(values) if _mean(values) else 0.0
+def _nearest(times, value): return int(np.abs(times - value).argmin())
+
+def update_standard_features(data):
+    """Compute the normal VisionMD feature set from manually edited cycles."""
+    velocity = np.asarray(data['velocity_Data'], dtype=float)
+    times = np.asarray(data['velocity_Time'], dtype=float)
+    fields = [data['valleys_StartTime'], data['valleys_StartData'], data['peaks_Time'], data['peaks_Data'], data['valleys_EndTime'], data['valleys_EndData']]
+    cycles = sorted([tuple(float(field[i]) for field in fields) for i in range(min(map(len, fields)))], key=lambda c: c[2])
+    cycles = [c for c in cycles if c[0] < c[2] < c[4]]
+    if not cycles or not len(velocity) or not len(times): raise ValueError("At least one complete cycle and a velocity signal are required.")
+    amplitudes=[]; speeds=[]; rms=[]; opening_speeds=[]; closing_speeds=[]; max_opening=[]; max_closing=[]; durations=[]; pauses=[]; hesitations=0
+    max_velocity=float(np.max(np.abs(velocity)))
+    for idx,(start_t,start_y,peak_t,peak_y,end_t,end_y) in enumerate(cycles):
+        duration=end_t-start_t; baseline=start_y+(end_y-start_y)*(peak_t-start_t)/duration; amplitude=abs(peak_y-baseline)
+        start_i,peak_i,end_i=sorted(_nearest(times,value) for value in (start_t,peak_t,end_t))
+        movement=velocity[start_i:end_i+1]; opening=velocity[start_i:peak_i+1]; closing=velocity[peak_i:end_i+1]
+        amplitudes.append(amplitude); speeds.append(amplitude/duration); rms.append(float(np.sqrt(np.mean(movement**2))))
+        opening_speeds.append(amplitude/(peak_t-start_t)); closing_speeds.append(amplitude/(end_t-peak_t)); max_opening.append(float(np.max(np.abs(opening)))); max_closing.append(float(np.max(np.abs(closing)))); durations.append(duration)
+        if len(movement)>2 and max_velocity:
+            signal_abs=np.abs(movement); threshold=max_velocity*.25; hesitations += int(np.count_nonzero((signal_abs[:-1]<threshold)!=(signal_abs[1:]<threshold))>4)
+        if idx+1<len(cycles): pauses.append(max(0.0,cycles[idx+1][0]-end_t))
+    peak_times=[c[2] for c in cycles]; frequency=len(cycles)/(cycles[-1][4]-cycles[0][0]) if cycles[-1][4]>cycles[0][0] else 0.0
+    range_duration=float(np.ptp(np.diff(peak_times))) if len(peak_times)>2 else 0.0; mean_duration=_mean(durations); mean_pause=_mean(pauses)
+    pause_count=sum(x>2*mean_duration for x in durations)+sum(x>2*mean_pause for x in pauses); third=max(1,len(cycles)//3)
+    amplitude_decay=_mean(amplitudes[:third])/_mean(amplitudes[-third:]) if _mean(amplitudes[-third:]) else 0.0; velocity_decay=_mean(speeds[:third])/_mean(speeds[-third:]) if _mean(speeds[-third:]) else 0.0
+    result={"MeanAmplitude":_mean(amplitudes),"StdAmplitude":_std(amplitudes),"MeanSpeed":_mean(speeds),"StdSpeed":_std(speeds),"MeanRMSVelocity":_mean(rms),"StdRMSVelocity":_std(rms),"MeanOpeningSpeed":_mean(opening_speeds),"StdOpeningSpeed":_std(opening_speeds),"MeanClosingSpeed":_mean(closing_speeds),"StdClosingSpeed":_std(closing_speeds),"MeanMaxOpeningSpeed":_mean(max_opening),"StdMaxOpeningSpeed":_std(max_opening),"MeanMaxClosingSpeed":_mean(max_closing),"StdMaxClosingSpeed":_std(max_closing),"MeanCycleDuration":_mean(durations),"StdCycleDuration":_std(durations),"CVAmplitude":_cv(amplitudes),"CVSpeed":_cv(speeds),"CVRMSVelocity":_cv(rms),"CVOpeningSpeed":_cv(opening_speeds),"CVClosingSpeed":_cv(closing_speeds),"CVMaxOpeningSpeed":_cv(max_opening),"CVMaxClosingSpeed":_cv(max_closing),"CVCycleDuration":_cv(durations),"Frequency":frequency,"AmplitudeDecay":amplitude_decay,"VelocityDecay":velocity_decay,"RangeCycleDuration":range_duration,"NumberofPauses":float(pause_count),"numberofHesitations":float(hesitations)}
+    return {key:float(np.nan_to_num(result[key],nan=0.0,posinf=0.0,neginf=0.0)) for key in STANDARD_FEATURE_KEYS}
+
 
 def updatePeaksAndValleys(inputJson):
     peaksData = inputJson['peaks_Data']
@@ -155,7 +189,7 @@ def updatePlotData(request):
     try:
         print("Updating plot started")
         start_time = time.time()
-        outputDict = updatePeaksAndValleys(json_data)
+        outputDict = update_standard_features(json_data)
         print("Plot updated in %s seconds" % (time.time() - start_time))
         result = outputDict
     except Exception as e:

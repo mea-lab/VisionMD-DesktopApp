@@ -16,15 +16,14 @@ import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 from ultralytics import YOLO
-import tensorflow as tf
-import tensorflow_hub as tfhub
-from tensorflow.python.eager.context import context
 import torch
 from scipy.signal import butter, filtfilt
 from scipy.interpolate import interp1d
 from scipy.signal import periodogram
 import numpy as np
 import os
+from app.analysis.models.metrabs_pytorch.loader import load_model as load_metrabs_model
+from app.analysis.model_registry import get_model, reset_yolo_runtime
 
 class HandTremorRightElbowExtendedTask(BaseTask):
     """
@@ -123,8 +122,6 @@ class HandTremorRightElbowExtendedTask(BaseTask):
             ]
             landmarks = self.interpolate_missing_landmarks(landmarks)
             landmarks_np = np.asarray(landmarks, dtype=np.float32)
-            tf.keras.backend.clear_session()
-            context().clear_kernel_cache()
             print("Passed landmark extraction")
 
             tremorSignal_Vertical_mm, tremorSignal_Horizontal_mm = self.calculate_signal(landmarks_np, pixel_to_mm_conversion_factor)
@@ -162,8 +159,6 @@ class HandTremorRightElbowExtendedTask(BaseTask):
         finally:
             if hasattr(self, "video") and self.video is not None:
                 self.video.release()
-            tf.keras.backend.clear_session()
-            context().clear_kernel_cache()
 
         return response
 
@@ -307,15 +302,23 @@ class HandTremorRightElbowExtendedTask(BaseTask):
 
         Returns an instance of the detector using the detectors classes
         """
-        device = torch.device("cpu")
-
         #Hand Landmark Detection Model - Nano
         nano_model_path = os.path.join(settings.BASE_DIR, 'app', 'analysis', 'models', 'best_hand_landmark_Nano.pt' )
-        self._modelHandLandmarkNano = YOLO(nano_model_path, task='pose')
+        self._modelHandLandmarkNano = get_model(
+            ("yolo-pose", os.path.abspath(nano_model_path)),
+            lambda: YOLO(nano_model_path, task='pose'),
+        )
+        reset_yolo_runtime(self._modelHandLandmarkNano)
 
         #metrabs model for 3d pose estimation 
-        metrabs_model_path = os.path.join(settings.BASE_DIR, 'app', 'analysis', 'models', 'metrabs_eff2s_y4' )
-        self._modelMeTrabs = tfhub.load(metrabs_model_path)      
+        metrabs_model_path = os.path.join(
+            settings.BASE_DIR, 'app', 'analysis', 'models',
+            'metrabs_eff2l_384px_800k_28ds_pytorch'
+        )
+        self._modelMeTrabs = get_model(
+            ("metrabs", os.path.abspath(metrabs_model_path)),
+            lambda: load_metrabs_model(metrabs_model_path),
+        )
 
 
         # load mediapipe hand landmark model
@@ -472,9 +475,9 @@ class HandTremorRightElbowExtendedTask(BaseTask):
         if self.field_of_view is not None:
             camera_args["default_fov_degrees"] = int(self.field_of_view)
         if self.intrinsic_matrix is not None:
-            camera_args["intrinsic_matrix"] = tf.convert_to_tensor(np.asarray(self.intrinsic_matrix, dtype=np.float32))
+            camera_args["intrinsic_matrix"] = np.asarray(self.intrinsic_matrix, dtype=np.float32)
         if self.extrinsic_matrix is not None:
-            camera_args["extrinsic_matrix"] = tf.convert_to_tensor(np.asarray(self.extrinsic_matrix, dtype=np.float32))
+            camera_args["extrinsic_matrix"] = np.asarray(self.extrinsic_matrix, dtype=np.float32)
     
         left_iris_diameters = []
         right_iris_diameters = []
@@ -546,10 +549,19 @@ class HandTremorRightElbowExtendedTask(BaseTask):
 
 
                         #use MeTrabs to estimate the 3D pose
-                        resultsMeTrabs = self._modelMeTrabs.detect_poses(frame, skeleton='mpi_inf_3dhp_17', **camera_args)
+                        device = self._modelMeTrabs.device
+                        frame_tensor = torch.from_numpy(np.ascontiguousarray(frame)).permute(2, 0, 1).to(device=device, dtype=torch.uint8)
+                        pose_box = torch.tensor([
+                            [float(boundingBox['x']), float(boundingBox['y']),
+                             float(boundingBox['width']), float(boundingBox['height'])]
+                        ], dtype=torch.float32, device=device)
+                        with torch.inference_mode(), torch.device(device):
+                            resultsMeTrabs = self._modelMeTrabs.estimate_poses(
+                                frame_tensor, pose_box, skeleton='mpi_inf_3dhp_17', **camera_args
+                            )
                     
                         if resultsMeTrabs:
-                            pose = resultsMeTrabs['poses3d'][0].cpu().numpy()
+                            pose = resultsMeTrabs['poses3d'][0].detach().cpu().numpy()
                             # Convert the pose to a numpy array
                             depthFace.append(pose[16][-1])  # depth of head
                             depthRightHand.append(pose[4][-1])  # depth of right hand
