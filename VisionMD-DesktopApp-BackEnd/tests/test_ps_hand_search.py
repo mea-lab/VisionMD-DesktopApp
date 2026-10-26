@@ -64,6 +64,7 @@ def test_localizer_retries_and_refuses_unresolved_tracks(monkeypatch, recover):
             boxes = SimpleNamespace(xyxy=tensor) if present else None
             class Boxes:
                 xyxy = tensor
+                conf = SimpleNamespace(cpu=lambda: SimpleNamespace(numpy=lambda: np.array([.9])))
                 def __len__(self): return 1
             return [SimpleNamespace(boxes=Boxes() if present else None)]
 
@@ -82,7 +83,7 @@ def test_localizer_retries_and_refuses_unresolved_tracks(monkeypatch, recover):
         with pytest.raises(ValueError,match='remains unreliable'):
             task._localize(Model())
     assert task._localization['expanded_retry']
-    assert len(task._localization['attempts']) == 2
+    assert len([a for a in task._localization['attempts'] if a['association']=='legacy_greedy']) == 2
 
 
 def test_ps_cache_key_changes_with_search_version(monkeypatch,tmp_path):

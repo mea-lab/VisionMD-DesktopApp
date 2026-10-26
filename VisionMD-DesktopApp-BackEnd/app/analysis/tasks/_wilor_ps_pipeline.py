@@ -63,6 +63,18 @@ def select_moving_track_timed(samples: dict[int, list[np.ndarray]]) -> list[tupl
     tracks: list[list[tuple[int, np.ndarray]]] = []
     for frame_idx, boxes in sorted(samples.items()):
         boxes = [np.asarray(b, dtype=float) for b in boxes]
+        # Merge duplicate detections before they can spawn competing identities.
+        unique = []
+        for box in boxes:
+            duplicate = False
+            for other in unique:
+                wh = np.maximum(0, np.minimum(box[2:], other[2:]) - np.maximum(box[:2], other[:2]))
+                inter = float(np.prod(wh))
+                area = float(np.prod(box[2:]-box[:2])); other_area = float(np.prod(other[2:]-other[:2]))
+                if inter / max(area + other_area - inter, 1.) > .5:
+                    duplicate = True; break
+            if not duplicate: unique.append(box)
+        boxes = unique
         if not tracks:
             tracks = [[(frame_idx, b)] for b in boxes]
             continue
@@ -586,7 +598,9 @@ def repair_short_flip_intervals(angles: np.ndarray, max_step_deg: float = 120,
         if start <= used_through:
             continue
         best = None
-        for end in edges[position + 1:]:
+        # An intervening large jump invalidates a constant-offset interval.
+        # Otherwise a one-frame outlier may shift an entire genuine cycle.
+        for end in edges[position + 1:position + 2]:
             if end - start > max_interval_frames:
                 break
             if end <= start or steps[start] * steps[end] >= 0:

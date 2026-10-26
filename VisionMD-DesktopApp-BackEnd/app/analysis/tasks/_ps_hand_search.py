@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import numpy as np
 
-PS_SEARCH_VERSION = "ps-expanded-search-v1"
+PS_SEARCH_VERSION = "ps-cross-crop-branch-v3"
 
 
 def expanded_search_box(subject, width, height, padding):

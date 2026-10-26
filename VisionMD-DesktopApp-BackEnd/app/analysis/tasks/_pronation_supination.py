@@ -30,7 +30,9 @@ from ._wilor_ps_pipeline import (WiLorBatch, angle_anomaly_diagnostics,
     palm_normal_angle, repair_short_flip_intervals,
     repair_uncertain_angle_samples, select_moving_track_timed, square_roi,
     zero_phase_lowpass)
-from ._wilor_temporal_refiner import refine_failed_trajectory
+from ._ps_branch_repair import repair_branch
+from ._ps_cross_crop_repair import repair_cross_crop_branch
+from ._ps_track_recovery import select_recovery_track
 from ._mediapipe_ps_screen import screen_mediapipe_world_landmarks
 from app.analysis.model_registry import reset_yolo_runtime
 from app.analysis.signal_analyzers.peakfinder_signal_analyzer import PeakfinderSignalAnalyzer
@@ -152,13 +154,13 @@ class HandPronationSupinationTask(BaseTask):
         count = self.task_end_frame_idx-self.task_start_frame_idx
         step = max(1, round(self.video_fps/12.))
         cls = 1 if self.HAND_LABEL == "Right" else 0
-        attempts = []
+        attempts = []; recovery_inputs = []
         # Begin outside the person box; retry a wider area before constructing
         # interpolated hand ROIs. Never accept a long unsupported trajectory.
         for padding in (.25, .50):
             cap = cv2.VideoCapture(self.video_file_path)
             cap.set(cv2.CAP_PROP_POS_FRAMES, self.task_start_frame_idx)
-            samples = {}; width = height = None
+            samples = {}; sample_confidences = {}; width = height = None
             try:
                 for i in range(count):
                     if self._cancelled(): raise RuntimeError("Analysis cancelled")
@@ -179,29 +181,59 @@ class HandPronationSupinationTask(BaseTask):
                         on_cpu_fallback=lambda: reset_yolo_runtime(model))
                     if result.boxes is not None and len(result.boxes):
                         boxes = result.boxes.xyxy.cpu().numpy().astype(float)
+                        confidence = result.boxes.conf.cpu().numpy().astype(float)
                         boxes[:, [0,2]] += px1; boxes[:, [1,3]] += py1
-                        boxes = associated_boxes(boxes, subject)
-                        if len(boxes): samples[i] = list(boxes)
+                        associated = associated_boxes(boxes, subject)
+                        if len(associated):
+                            samples[i] = list(associated)
+                            sample_confidences[i] = [float(confidence[np.all(boxes == box, axis=1)].max())
+                                                     for box in associated]
                     if i % max(1,count//20) == 0:
                         self._progress(32+16*i/max(1,count), "Localizing hand in expanded search area")
             finally:
                 cap.release()
             if width is None:
                 raise ValueError("No video frames could be read for the selected task interval.")
+            track = []
             try:
                 track = select_moving_track_timed(samples)
                 quality = track_search_quality(track, count, step, self.video_fps,
                                                search, width, height)
             except RuntimeError as exc:
                 quality = {"pass": False, "reasons": [str(exc)]}
-            attempts.append({"padding_fraction": padding, "search_box_xyxy": search.tolist(),
-                             **quality})
+            recovery_inputs.append((samples, sample_confidences, track, search.copy(), width, height, padding))
+            attempts.append({"association": "legacy_greedy", "padding_fraction": padding, "search_box_xyxy": search.tolist(),
+                             "frames_with_detections": len(samples),
+                             "sampled_frames": len(range(0,count,step)), **quality})
             self._localization = {"version": PS_SEARCH_VERSION, "attempts": attempts,
                                   "expanded_retry": len(attempts)>1, **quality}
             if quality["pass"]: break
             self._progress(47, "Hand track incomplete; expanding search area")
+        # Preserve any passing legacy track. Only recover after both original searches failed.
         if not quality["pass"]:
-            raise ValueError("P/S hand localization remains unreliable after expanding the search: "
+            for samples, confidence, reference, candidate_search, candidate_width, candidate_height, padding in recovery_inputs:
+                if not reference:
+                    continue
+                try:
+                    candidate = select_recovery_track(samples, fps=self.video_fps,
+                                                       reference_track=reference, confidences=confidence)
+                    candidate_quality = track_search_quality(candidate, count, step, self.video_fps,
+                                                            candidate_search, candidate_width, candidate_height)
+                except RuntimeError as exc:
+                    candidate_quality = {"pass": False, "reasons": [str(exc)]}
+                attempts.append({"association": "bounded_global_recovery", "padding_fraction": padding,
+                                 "search_box_xyxy": candidate_search.tolist(),
+                                 "frames_with_detections": len(samples),
+                                 "sampled_frames": len(range(0,count,step)), **candidate_quality})
+                self._localization = {"version": "ps-track-recovery-v2", "attempts": attempts,
+                                      "expanded_retry": True, "recovery_used": candidate_quality["pass"],
+                                      **candidate_quality}
+                if candidate_quality["pass"]:
+                    track = candidate; quality = candidate_quality; search = candidate_search
+                    width = candidate_width; height = candidate_height
+                    break
+        if not quality["pass"]:
+            raise ValueError("P/S hand tracking remains unreliable after expanding the search: "
                              + "; ".join(quality["reasons"]) +
                              ". Select a wider participant box or a shorter reliable interval.")
         timed = np.array([i for i,_ in track]); boxes = np.array([x for _,x in track])
@@ -249,7 +281,7 @@ class HandPronationSupinationTask(BaseTask):
                 self._progress(96,"MediaPipe passed screening; finalizing provisional result")
                 final=screening["final"]; initial=float(np.median(final[:max(1,round(.5*self.video_fps))]))
                 self._angles=(final-initial).tolist()
-                self._pipeline={"version":"ps-expanded-search-v1",
+                self._pipeline={"version":PS_SEARCH_VERSION,
                     "engine":"mediapipe_world_landmarks","requires_verification":True,
                     "screening":{key:value for key,value in screening.items()
                                  if key not in {"raw","projected","corrected","final","diagnostics"}},
@@ -275,21 +307,43 @@ class HandPronationSupinationTask(BaseTask):
             rerun_started=time.perf_counter(); rois=dynamic; raw,projected=self._infer(wilor,rois,count); final,corrected,diag,quality=_process(raw,self.video_fps,self.HAND_LABEL=="Right"); rerun_seconds=time.perf_counter()-rerun_started
         initial=float(np.median(final[:max(1,round(.5*self.video_fps))]))
         relative=final-initial
-        temporal={"attempted":False,"accepted":False,
-                  "reason":"deterministic_trajectory_passed"}
-        if not quality["pass"]:
+        original_relative = relative.copy()
+        relative, branch_repair = repair_branch(relative, projected, self.video_fps)
+        cross_crop = {"attempted": False, "accepted": False,
+                      "reason": "no_unresolved_excessive_range"}
+        cross_crop_seconds = 0.
+        if not branch_repair["accepted"] and np.ptp(np.percentile(relative, [5,95])) > 250:
+            self._progress(94, "Verifying angle winding with a stabilized hand crop")
+            retry_started = time.perf_counter()
             try:
-                relative,temporal=refine_failed_trajectory(
-                    raw,rois[:len(raw)],final,self.HAND_LABEL=="Right",self.video_fps)
+                center = (fixed[:2] + fixed[2:]) / 2
+                half_size = (fixed[2:] - fixed[:2]) * .4
+                stable = np.r_[center-half_size, center+half_size]
+                stable_rois = np.repeat(stable[None,:], count, axis=0)
+                retry_raw, _ = self._infer(wilor, stable_rois, count)
+                retry_final, _, _, retry_quality = _process(retry_raw, self.video_fps, self.HAND_LABEL=="Right")
+                retry_final -= np.median(retry_final[:max(1,round(.5*self.video_fps))])
+                if retry_quality["angle_method"] != quality["angle_method"]:
+                    cross_crop = {"attempted": True, "accepted": False,
+                                  "reason": "different_angle_estimators"}
+                else:
+                    relative, cross_crop = repair_cross_crop_branch(relative, retry_final, self.video_fps)
+                cross_crop["reference_crop_scale"] = .8
+                cross_crop["reference_quality"] = retry_quality
             except Exception as exc:
-                # WiLoR output remains usable when an optional temporal model
-                # is absent or unavailable on a deployment.
-                temporal={"attempted":True,"accepted":False,
-                          "rejection_reasons":["refiner_error"],
-                          "error":f"{type(exc).__name__}: {exc}"}
+                if self._cancelled():
+                    raise
+                cross_crop = {"attempted": True, "accepted": False,
+                              "reason": "cross_crop_retry_failed",
+                              "error": f"{type(exc).__name__}: {exc}"}
+            cross_crop_seconds = time.perf_counter()-retry_started
+        repaired_angle = branch_repair["accepted"] or cross_crop["accepted"]
+        quality["final_robust_range_deg"] = float(np.ptp(np.percentile(relative, [5,95])))
+        temporal = {"attempted": False, "accepted": False,
+                    "reason": "unrestricted_refiner_disabled_use_constrained_branch_repair"}
         self._angles=relative.tolist()
         self._progress(98,"Finalizing P/S signal")
-        self._pipeline={"version":"ps-expanded-search-v1","engine":"yolo_wilor","requires_verification":not quality["pass"],"roi_mode":"dynamic" if direct_dynamic or rerun else "fixed","dynamic_rerun":rerun,"fixed_to_typical_crop_ratio":ratio,"localization_fps":12.,"track_coverage":coverage,"localization":self._localization,"quality":quality,"temporal_refiner":temporal,"hand_detector":_hand_model_path(),"screening":{key:value for key,value in screening.items() if key not in {"raw","projected","corrected","final","diagnostics"}} if screening else {"skipped":True,"reason":"WiLoR explicitly requested"},"timing":{"localization_seconds":round(localization_seconds,3),"initial_wilor_seconds":round(initial_inference_seconds,3),"dynamic_rerun_seconds":round(rerun_seconds,3),"total_seconds":round(time.perf_counter()-total_started,3)}}
+        self._pipeline={"version":PS_SEARCH_VERSION,"engine":"yolo_wilor","requires_verification":not quality["pass"] or repaired_angle,"roi_mode":"dynamic" if direct_dynamic or rerun else "fixed","dynamic_rerun":rerun,"fixed_to_typical_crop_ratio":ratio,"localization_fps":12.,"track_coverage":coverage,"localization":self._localization,"quality":quality,"temporal_refiner":temporal,"branch_repair":branch_repair,"cross_crop_repair":cross_crop,"review":{"original_relative_angle":original_relative.tolist(),"final_relative_angle":relative.tolist(),"fps":self.video_fps,"start_frame":self.task_start_frame_idx,"angle_method":quality["angle_method"],"reference_landmarks":{"geometry":{"longitudinal":[0,9],"across_palm":[17,5]},"palm_normal":{"plane":[0,1,7],"facing_hint":[4,20]}},"status":"automatic_repair_requires_review" if repaired_angle else ("review_required" if not quality["pass"] else "provisional")},"hand_detector":_hand_model_path(),"screening":{key:value for key,value in screening.items() if key not in {"raw","projected","corrected","final","diagnostics"}} if screening else {"skipped":True,"reason":"WiLoR explicitly requested"},"timing":{"localization_seconds":round(localization_seconds,3),"initial_wilor_seconds":round(initial_inference_seconds,3),"dynamic_rerun_seconds":round(rerun_seconds,3),"cross_crop_seconds":round(cross_crop_seconds,3),"total_seconds":round(time.perf_counter()-total_started,3)}}
         return self._format_output(corrected,projected)
 
     def _format_output(self,corrected,projected):
