@@ -1,3 +1,5 @@
+import { useRequiredGaitFov } from '../../components/RequiredGaitFov';
+import { isGait } from '../../components/ParticipantHeight';
 import { useRequiredGaitHeight, requiresParticipantHeight } from '../../components/ParticipantHeight';
 //src/pages/TaskDetails/index.jsx
 import {
@@ -46,6 +48,7 @@ const TaskDetails = () => {
   } = useContext(VideoContext);
   
   const { ensureHeight, heightDialog } = useRequiredGaitHeight(tasks, setTasks);
+  const { ensureFov, fovDialog } = useRequiredGaitFov(tasks, setTasks);
   const navigate = useNavigate();
   const [openJsonUpload, setOpenJsonUpload] = useState(false);
   const [editingBox, setEditingBox] = useState(false);
@@ -150,6 +153,11 @@ const TaskDetails = () => {
         const height = await ensureHeight(taskData);
         if (!height) return false;
         taskData = { ...taskData, height };
+      }
+      if (isGait(taskData)) {
+        const field_of_view = await ensureFov(taskData);
+        if (!field_of_view) return false;
+        taskData = { ...taskData, field_of_view };
       }
 
       const chosenTaskBox = tasks.find(box => box.id === taskData.id);
@@ -496,6 +504,7 @@ const TaskDetails = () => {
           </div>
 
           {heightDialog}
+          {fovDialog}
           {/* Keep the dialog mounted so it can open from any state */}
           <JSONUploadDialog
             dialogOpen={openJsonUpload}

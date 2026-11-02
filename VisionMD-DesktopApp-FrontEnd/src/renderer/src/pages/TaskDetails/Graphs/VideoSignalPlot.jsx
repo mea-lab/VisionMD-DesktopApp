@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import UplotReact from 'uplot-react';
 import 'uplot/dist/uPlot.min.css';
+import { useTheme } from '../../../contexts/ThemeContext';
 
 /** Shared gait/transition signal plot. Times are absolute video seconds. */
 export default function VideoSignalPlot({ title, unit, axisLabel, time, series, videoRef,
   height = 320, markers = [], bands = [], threshold, peaks }) {
+  const { theme } = useTheme();
+  const light = theme === 'light';
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const [width, setWidth] = useState(600);
@@ -47,8 +50,8 @@ export default function VideoSignalPlot({ title, unit, axisLabel, time, series, 
     scales: { x: { time: false, min: time[0], max: time.at(-1) } },
     legend: { show: series.length > 1 },
     axes: [
-      { label: 'Time (s)', values: (_, values) => values.map(value => value.toFixed(2)), grid: { color: '#52525b' }, stroke: '#9ca3af' },
-      { label: axisLabel || unit || title, size: 65, grid: { color: '#52525b' }, stroke: '#9ca3af' },
+      { label: 'Time (s)', values: (_, values) => values.map(value => value.toFixed(2)), grid: { stroke: light ? '#e4e4e7' : '#52525b' }, stroke: light ? '#52525b' : '#9ca3af' },
+      { label: axisLabel || unit || title, size: 65, grid: { stroke: light ? '#e4e4e7' : '#52525b' }, stroke: light ? '#52525b' : '#9ca3af' },
     ],
     series: [{}, ...series.map(item => ({ label: item.name, stroke: item.color || '#1f77b4', width: 2, points: { show: false } }))],
     cursor: { drag: { x: true }, x: true, y: false },
@@ -56,7 +59,7 @@ export default function VideoSignalPlot({ title, unit, axisLabel, time, series, 
       drawClear: [u => {
         const { ctx, bbox } = u;
         ctx.save();
-        ctx.fillStyle = '#39393F';
+        ctx.fillStyle = light ? '#ffffff' : '#39393F';
         ctx.fillRect(bbox.left, bbox.top, bbox.width, bbox.height);
         ctx.beginPath(); ctx.rect(bbox.left, bbox.top, bbox.width, bbox.height); ctx.clip();
         for (const band of bands) {
@@ -74,10 +77,10 @@ export default function VideoSignalPlot({ title, unit, axisLabel, time, series, 
           const x = u.valToPos(value, 'x', true);
           ctx.strokeStyle = color; ctx.setLineDash([5,4]); ctx.beginPath(); ctx.moveTo(x,bbox.top); ctx.lineTo(x,bbox.top+bbox.height); ctx.stroke();
         };
-        markers.forEach(item => { if (Number.isFinite(item.time)) vertical(item.time,item.color || '#d4d4d8'); });
+        markers.forEach(item => { if (Number.isFinite(item.time)) vertical(item.time,item.color || (light ? '#52525b' : '#d4d4d8')); });
         if (Number.isFinite(threshold)) {
           const y = u.valToPos(threshold,'y',true);
-          ctx.strokeStyle = '#d4d4d8'; ctx.setLineDash([6,4]); ctx.beginPath(); ctx.moveTo(bbox.left,y); ctx.lineTo(bbox.left+bbox.width,y); ctx.stroke();
+          ctx.strokeStyle = light ? '#52525b' : '#d4d4d8'; ctx.setLineDash([6,4]); ctx.beginPath(); ctx.moveTo(bbox.left,y); ctx.lineTo(bbox.left+bbox.width,y); ctx.stroke();
         }
         ctx.setLineDash([]); ctx.fillStyle = '#fb923c';
         peaks?.time?.forEach((t,i) => {
@@ -99,7 +102,7 @@ export default function VideoSignalPlot({ title, unit, axisLabel, time, series, 
         };
       }],
     },
-  }), [width, height, time, series, title, unit, axisLabel, markers, bands, threshold, peaks, videoRef]);
+  }), [width, height, time, series, title, unit, axisLabel, markers, bands, threshold, peaks, videoRef, light]);
   if (time.length < 2 || !series.length) return null;
   return <div ref={containerRef} className="my-4 w-full min-w-0 overflow-hidden" onDoubleClick={() => {
     const video = videoRef?.current;

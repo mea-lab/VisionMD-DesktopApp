@@ -1,5 +1,6 @@
 import numpy as np
 import scipy.signal as signal
+from app.analysis.signal_analyzers.gait_study_features import stride_samples, study_segment_summaries, pooled_study_features
 from app.analysis.signal_analyzers.gait_step_width import foot_line_widths
 from app.analysis.signal_analyzers.gait_segment_variability import combine_segment_variability
 from app.analysis.signal_analyzers.gait_extended_features import ankle_lift_samples, extended_results, phase_time_samples, velocity
@@ -247,11 +248,14 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
             for side, ankle_index in (("left", 6), ("right", 3)):
                 side_key = "step_width_sides" if key == "step_widths" else "step_sides"
                 samples[f"{sample_key}_{side}"] = synthgait[key][synthgait[side_key] == ankle_index]
+        samples.update(stride_samples(gait_event_dic, kp, float(fps)))
+        samples.update(study_segment_summaries(samples))
         samples.update(phase_time_samples(gait_event_dic, float(fps)))
         samples.update(ankle_lift_samples(kp, gait_event_dic, float(fps)))
         for key in ("arm_velocity_left", "arm_velocity_right", "torso_ml_velocity"):
             samples[key] = synthgait[key]
         results.update(extended_results(samples))
+        results.update(pooled_study_features([samples]))
 
         return (results, samples) if return_samples else results
 
@@ -598,6 +602,7 @@ class GaitSignalAnalyzer(BaseSignalAnalyzer):
             })
         extra_keys = {key for item in sample_sets for key in item}
         pooled.update(extended_results({key: combine(key) for key in extra_keys}))
+        pooled.update(pooled_study_features(sample_sets))
         # All diagnostic variability follows the same hierarchy; never pool
         # observations across segment means or weight longer segments more.
         for key, name, scale in (

@@ -50,6 +50,14 @@ desktop task. It writes ordinary result JSON plus a complete
 `*_visionmd_project.json` snapshot that can be imported with **Load Project
 JSON** on the Home screen.
 
+## Linux video conversion
+
+VisionMD automatically downloads and verifies its own FFmpeg/FFprobe 7.0.2 pair
+when video conversion is first needed. No system FFmpeg installation or manual
+setup is required. The first use requires internet access; later uses work offline
+from the user cache. Supported Linux architectures are x86-64 and arm64. See
+[video normalization](docs/video_normalization.md#consistent-linux-binaries).
+
 ## Prerequisites
 - Anaconda (or Miniconda)  
 - Python 3.10

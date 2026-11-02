@@ -82,7 +82,7 @@ const TaskList = ({
         Task Selection
       </div>
 
-      <div className="flex flex-col overflow-y-auto overflow-x-hidden">
+      <div className="flex flex-col overflow-y-auto overflow-x-auto">
         {tasks.length > 0 ? (
           (() => {
             const typeCounts = {};

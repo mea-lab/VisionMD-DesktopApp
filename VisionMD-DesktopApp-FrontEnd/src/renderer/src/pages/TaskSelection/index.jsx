@@ -1,3 +1,5 @@
+import { useRequiredGaitFov, validFov } from '../../components/RequiredGaitFov';
+import { isGait } from '../../components/ParticipantHeight';
 //src/pages/TaskSelection/index.jsx
 import { useRequiredGaitHeight, requiresParticipantHeight, validHeight } from '../../components/ParticipantHeight';
 import { initializeTaskBox, patchTask } from './taskBoundingBox';
@@ -64,15 +66,19 @@ const TaskSelection = () => {
   };
 
   const { ensureHeight, heightDialog } = useRequiredGaitHeight(tasks, setTasks);
+  const { ensureFov, fovDialog } = useRequiredGaitFov(tasks, setTasks);
   const moveToNextScreen = async () => {
     const missing = tasks.find(task => requiresParticipantHeight(task) && !validHeight(task.height));
     if (missing && !(await ensureHeight(missing))) return;
+    const missingFov = tasks.find(task => isGait(task) && !validFov(task.field_of_view));
+    if (missingFov && !(await ensureFov(missingFov))) return;
     navigate("/taskdetails");
   };
 
   return (
     <div className="flex flex-col h-screen">
       {heightDialog}
+      {fovDialog}
       <div className="flex overflow-hidden">
         <div className="flex w-1/2 h-screen">
           <VideoPlayer

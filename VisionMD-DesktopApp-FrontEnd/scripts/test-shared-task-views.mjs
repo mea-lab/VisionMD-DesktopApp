@@ -17,10 +17,11 @@ import React from ${JSON.stringify(react)};
 import { renderToStaticMarkup } from ${JSON.stringify(server)};
 import Sit from ${JSON.stringify(graphs+'/SitToStandGraphs.jsx')};
 import Gait from ${JSON.stringify(graphs+'/GaitGraphs.jsx')};
+import { ThemeProvider } from ${JSON.stringify(path.join(base,'src/renderer/src/contexts/ThemeContext.jsx'))};
 import Segments from ${JSON.stringify(graphs+'/GaitSegmentsPanel.jsx')};
 import { reviewedBoundary } from ${JSON.stringify(graphs+'/sitToStandBoundaries.js')};
 export { reviewedBoundary };
-export function render(Component,props) { return renderToStaticMarkup(React.createElement(Component,props)); }
+export function render(Component,props) { return renderToStaticMarkup(React.createElement(ThemeProvider,null,React.createElement(Component,props))); }
 export { Sit, Gait, Segments };
 `;
 const out = await build({ stdin: { contents: source, resolveDir: base }, bundle: true,
@@ -41,6 +42,8 @@ mod.filename = path.join(base,'scripts/.task-view-test.cjs');
 mod.paths = Module._nodeModulePaths(base);
 mod._compile(out.outputFiles[0].text,mod.filename);
 const { Sit,Gait,Segments,render,reviewedBoundary } = mod.exports;
+let selectedTheme = 'dark';
+globalThis.localStorage = { getItem: () => selectedTheme };
 const time = Array.from({length:121},(_,i) => 2+i/30);
 const boundaries = { preparation_start:2.5,rise_start:3,rise_end:5 };
 const signals = {time,pelvis_height:time.map(t=>t/10),pelvis_evidence:time.map(t=>t-2),shoulder_evidence:time.map(t=>t-1.8),pelvis_velocity:time.map(()=>2)};
@@ -70,6 +73,12 @@ assert.equal(reviewedBoundary('preparation_start',4,boundaries,2,6,30),3);
 assert.equal(reviewedBoundary('rise_start',6,boundaries,2,6,30),5-1/30);
 assert.equal(reviewedBoundary('rise_end',1,boundaries,2,6,30),3+1/30);
 reset();render(Gait,{...props,tasks:[{start:2,end:6,data:{signals:{pelvis:[1,2,3]}}}]});assert.equal(__plots.length,1);assert.deepEqual(__plots[0].data[0],[2,4,6]);
+assert.equal(__plots[0].options.axes[0].grid.stroke, '#52525b');
+selectedTheme = 'light'; reset(); render(Gait,{...props,tasks:[{start:2,end:6,data:{signals:{pelvis:[1,2,3]}}}]});
+assert.equal(__plots[0].options.axes[0].grid.stroke, '#e4e4e7');
+let background; const lightCtx = new Proxy({}, { get: (_, key) => () => {}, set: (_, key, value) => { if (key === 'fillStyle') background = value; return true; } });
+__plots[0].options.hooks.drawClear[0]({ctx: lightCtx, bbox: {left:0,top:0,width:100,height:100}});
+assert.equal(background, '#ffffff'); selectedTheme = 'dark';
 reset();render(Segments,{...props,tasks:[{start:2,end:6,data:{gait_analysis_cache:{start_time:2,fps:30,poses3d:new Array(121)},turning_metadata:{turns:[{start_time_seconds:3,end_time_seconds:3.5},{start_time_seconds:4.5,end_time_seconds:5}]}}}]});
 assert.equal(__timelines.length,1);assert.equal(__timelines[0].regions.filter(r=>r.id.startsWith('turn-')).length,2);assert.equal(__timelines[0].regions.filter(r=>r.id.startsWith('walking-')).length,3);
 reset();render(Gait,{...props,initialSignal:'preparation',plotGroups:[{key:'preparation',title:'Preparation signals',time,series:[{name:'Pelvis',values:signals.pelvis_evidence},{name:'Shoulders',values:signals.shoulder_evidence}],threshold:1}]});

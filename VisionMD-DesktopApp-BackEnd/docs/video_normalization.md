@@ -81,3 +81,16 @@ CFR detection alone therefore cannot guarantee browser playback on another OS.
 The codec preparation path converts these to upright H.264/yuv420p while retaining
 frame cadence and validates decoded frame count and duration before replacement.
 All investigation conversions use temporary copies; source recordings are untouched.
+
+## Consistent Linux binaries
+
+On Linux, source runs and packaged builds automatically use the same pinned
+FFmpeg/FFprobe 7.0.2 static pair on x86-64 and arm64. On first use VisionMD
+downloads the architecture-specific archive from the pinned immutable release
+and verifies its published SHA-256 before extracting only the two executables.
+They are cached under `${XDG_CACHE_HOME:-~/.cache}/visionmd/ffmpeg/` and reused
+offline. The system `PATH` and other installed FFmpeg versions are not used for
+Linux video normalization. If first download fails, the operation reports the
+error rather than silently using a different version. The archive is GPL-licensed;
+release details, source, and checksums are at
+https://github.com/publicala/ffmpeg-static/releases/tag/v7.0.2.

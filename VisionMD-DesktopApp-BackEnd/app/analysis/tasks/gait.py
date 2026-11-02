@@ -22,7 +22,7 @@ from app.analysis.signal_analyzers.gait_step_width import (
     STEADY_WIDTH_FEATURES, steady_width_samples, summarize_width,
 )
 from app.analysis.signal_analyzers.gait_segment_variability import combine_segment_variability
-from app.analysis.signal_analyzers.gait_reporting import public_features, diagnostic_features
+from app.analysis.signal_analyzers.gait_reporting import public_features, diagnostic_features, study_table_features
 from app.analysis.signal_analyzers.gait_spatial_calibration import height_spatial_calibration
 from app.analysis.gait_visibility import restrict_walking_ranges
 from app.analysis.torch_device import run_with_device_fallback
@@ -148,7 +148,7 @@ class GaitTask(BaseTask):
             results_mirrored = analysis["results_mirrored"]
             gait_event_dic = analysis["gait_event_dic"]
             gait_event_dic_mirrored = analysis["gait_event_dic_mirrored"]
-            avg_results = self.calculate_average_features(results, results_mirrored)
+            avg_results = study_table_features(self.calculate_average_features(results, results_mirrored), turning_metadata)
 
             # 5) Get landmark colors
             landmark_colors = self.calculate_landmark_colors(landmarks['poses3d'], gait_event_dic, self.fps)
@@ -620,7 +620,10 @@ class GaitTask(BaseTask):
 
 
         # Getting camera properties
-        field_of_view = float(json_data.get('field_of_view')) if json_data.get('field_of_view') else None
+        raw_fov = json_data.get('field_of_view')
+        field_of_view = float(raw_fov) if raw_fov not in (None, '') else None
+        if field_of_view is not None and (not np.isfinite(field_of_view) or not 0 < field_of_view < 180):
+            raise ValueError('Field of view must be greater than 0 and less than 180 degrees.')
         sensor_height = float(json_data.get('sensor_height')) if json_data.get('sensor_height') else None
         sensor_width = float(json_data.get('sensor_width')) if json_data.get('sensor_width') else None
         focal_length = float(json_data.get('focal_length')) if json_data.get('focal_length') else None

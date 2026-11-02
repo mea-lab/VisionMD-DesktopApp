@@ -3,13 +3,22 @@ import CloudDownload from '@mui/icons-material/CloudDownload';
 import ArrowDropDown from '@mui/icons-material/ArrowDropDown';
 
 
-const FeatureTable = ({ tasks, selectedTaskIndex, fileName, includeUnavailable = false }) => {
+const FeatureTable = ({ tasks, selectedTaskIndex, fileName, includeUnavailable = false, featureOrder = [], featureSections = [] }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef();
 
   const task = tasks[selectedTaskIndex] || {};
-  const entries = Object.entries(task.data || {}).filter(([, v]) => typeof v === 'number' || typeof v === 'string' || (includeUnavailable && v === null));
-  const header = useMemo(() => entries.map(([k]) => k), [entries]);
+  const sections = featureSections.length && task.data
+    ? featureSections.map(section => ({ ...section, entries: section.features.map(feature => {
+        const key = typeof feature === 'string' ? feature : feature.key;
+        return { key, label: typeof feature === 'string' ? feature : feature.label, value: task.data[key] ?? null };
+      }) }))
+    : [{ entries: featureOrder.length && task.data
+        ? featureOrder.map(key => ({ key, label: key, value: task.data[key] ?? null }))
+        : Object.entries(task.data || {}).filter(([, v]) => typeof v === 'number' || typeof v === 'string' || (includeUnavailable && v === null)).map(([key, value]) => ({ key, label: key, value })) }];
+  const entries = sections.flatMap(section => section.entries);
+  const header = useMemo(() => entries.map(entry => entry.label), [entries]);
+  const keys = entries.map(entry => entry.key);
 
   const btn = `bg-[#1976d2] hover:bg-[#1565c0] text-white font-medium px-3 py-1 rounded-md inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed`;
 
@@ -20,7 +29,7 @@ const FeatureTable = ({ tasks, selectedTaskIndex, fileName, includeUnavailable =
   const csvRow = arr => {
     return (
       arr.map(v =>
-        v == null ? '' : typeof v === 'string' && v.includes(',') ? `"${v}"` : v
+        v == null ? '' : typeof v === 'string' && /[",\r\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
       ).join(',')
     )
   };
@@ -33,10 +42,16 @@ const FeatureTable = ({ tasks, selectedTaskIndex, fileName, includeUnavailable =
     URL.revokeObjectURL(url);
   };
 
+  const csvHeader = featureSections.length ? ["Video name", ...header] : header;
+  const csvValues = t => {
+    const values = keys.map(key => t.data[key] ?? '');
+    return featureSections.length ? [t.data['File name'] || fileName, ...values] : values;
+  };
+
   const csvCurrent = () => {
     if (!task.data) return;
     blob(
-      [csvRow(header), csvRow(header.map(h => task.data[h]))].join('\n'),
+      [csvRow(csvHeader), csvRow(csvValues(task))].join('\n'),
       `${safe(fileName)}_${safe(task.name)}.csv`
     );
   };
@@ -44,17 +59,17 @@ const FeatureTable = ({ tasks, selectedTaskIndex, fileName, includeUnavailable =
   const csvAll = () => {
     const group = tasks.filter(t => t.name === task.name && t.data);
     if (!group.length) return;
-    const rows = group.map(t => csvRow(header.map(h => t.data[h] ?? '')));
-    const avg = header.map(h => {
+    const rows = group.map(t => csvRow(csvValues(t)));
+    const avg = keys.map(h => {
       const lower = h.toLowerCase();
       if (lower === 'task name') return `average_${fileName.split('.')[0]}`;
       if (lower === 'file name') return fileName;
       const nums = group.map(t => t.data[h]).filter(v => typeof v === 'number');
       return nums.length ? (nums.reduce((a, b) => a + b, 0) / nums.length).toFixed(4) : '';
     });
-    rows.push(csvRow(avg));
+    rows.push(csvRow(featureSections.length ? [`Average (${fileName})`, ...avg] : avg));
     blob(
-      [csvRow(header), ...rows].join('\n'),
+      [csvRow(csvHeader), ...rows].join('\n'),
       `${safe(fileName)}_${safe(task.name)}_all.csv`
     );
   };
@@ -67,30 +82,30 @@ const FeatureTable = ({ tasks, selectedTaskIndex, fileName, includeUnavailable =
 
   return (
     <div>
-      <div className="overflow-x-auto m-4 rounded-lg border-2 border-zinc-500 bg-[#333338]">
-        <table className="min-w-full divide-y divide-zinc-400">
-          <thead className="">
-            <tr>
-              <th className="px-6 py-3 text-left font-normal text-gray-100">
-                Feature
-              </th>
-              <th className="px-6 py-3 text-left font-normal text-gray-100">
-                Value
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-600">
-            {entries.map(([k, v]) => (
-              <tr key={k}>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{k}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">
-                  {v == null ? 'Unavailable' : typeof v === 'number' ? v.toFixed(4) : v}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {sections.map((section, index) => (
+        <section key={section.title || index}>
+          {section.title && <h2 className="mx-4 mt-5 text-lg font-semibold text-gray-100">{section.title}</h2>}
+          {section.description && <p className="mx-4 mt-1 text-sm text-gray-300">{section.description}</p>}
+          <div className="overflow-x-auto m-4 rounded-lg border-2 border-zinc-500 bg-[#333338]">
+            <table className="min-w-full divide-y divide-zinc-400">
+              <thead><tr>
+                <th className="px-6 py-3 text-left font-normal text-gray-100">Feature</th>
+                <th className="px-6 py-3 text-left font-normal text-gray-100">Value</th>
+              </tr></thead>
+              <tbody className="divide-y divide-zinc-600">
+                {section.entries.map(({ key, label, value }) => (
+                  <tr key={key}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-200">{label}</td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-400">
+                      {value == null || (typeof value === 'number' && !Number.isFinite(value)) ? 'Unavailable' : typeof value === 'number' ? value.toFixed(4) : value}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ))}
 
       <div ref={ref} className="relative flex justify-center mt-4 mb-12">
         <div className="flex">

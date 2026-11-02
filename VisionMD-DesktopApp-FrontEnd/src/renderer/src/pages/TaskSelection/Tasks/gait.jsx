@@ -104,31 +104,6 @@ const Gait = ({
   ) => {
     return (
       <div>
-        {/* Field of View */}
-        <div className="py-1.5 flex justify-between items-center">
-          <label className="text-gray-100">Field of View (°):</label>
-          <div>
-            <input
-              type="number"
-              step="any"
-              className="border border-zinc-500 rounded-lg bg-transparent p-1 pl-2 py-1.5 w-20 text-left text-gray-100 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none [&input[type=number]]:appearance-none"
-              value={fov || ''}
-              placeholder='55'
-              onChange={e => {
-                const v = e.target.value === '' ? null : +e.target.value;
-                setTaskGlobals({ field_of_view: v });
-                onFieldChange(v, 'field_of_view', task);
-              }}
-            />
-            <Tooltip
-              arrow
-              title="Enter the field of view (degrees) along the longer side of the video frame. (Optional)"
-            >
-              <HelpOutlineIcon className="ml-1 text-gray-100 cursor-pointer" fontSize="small" />
-            </Tooltip>
-          </div>
-        </div>
-
       {/* Sensor Width (mm) */}
       <div className="py-1.5 flex justify-between items-center">
         <label className="text-gray-100">Sensor Pixel Width (µm/pixels):</label>
@@ -317,7 +292,7 @@ const Gait = ({
   return (
     <div
       tabIndex={-1}
-      className="flex-none border-2 border-zinc-500 rounded-lg mb-4 min-h-[50px] bg-zinc-600 
+      className="flex-none border-2 border-zinc-500 rounded-lg mb-4 min-h-[50px] min-w-[680px] bg-zinc-600
                  focus:border-blue-500 focus:outline-none
                  transition-all duration-500 ease-in-out"
       key={task.id}
@@ -412,8 +387,8 @@ const Gait = ({
           {taskTypeIndex === 0 && (
             <>
               {/* Camera Properties & Height */}
-              <div className="flex items-center justify-between space-x-2 min-w-[400px] w-full">
-                <div className="flex items-center space-x-2">
+              <div className="flex flex-nowrap items-start justify-between gap-3 w-full">
+                <div className="flex shrink-0 items-center space-x-2 whitespace-nowrap">
                   <label className="text-gray-100 inline">Camera properties:</label>
                   <button
                     className="px-2 py-1.5 w-14 border border-zinc-500 rounded-lg text-gray-100 hover:bg-zinc-500"
@@ -423,10 +398,27 @@ const Gait = ({
                   </button>
                 </div>
 
-                <HeightInput value={h} onChange={value => {
-                  setTaskGlobals({ height: value });
-                  onFieldChange(value, 'height', task);
-                }} />
+                <div className="max-w-full overflow-x-auto">
+                <div className="flex w-max flex-col items-start gap-2">
+                  <HeightInput labelClassName="inline-block w-32 shrink-0 text-right" value={h} onChange={value => {
+                    setTaskGlobals({ height: value });
+                    onFieldChange(value, 'height', task);
+                  }} />
+                  <div className="flex flex-nowrap items-center gap-2 whitespace-nowrap text-gray-100">
+                    <label className="inline-block w-32 shrink-0 text-right" htmlFor={`gait-fov-${task.id}`}>Field of view (°):</label>
+                    <input id={`gait-fov-${task.id}`} aria-label="Field of view in degrees" type="number" min="0" max="180" step="any" required
+                      className="w-20 rounded border border-zinc-500 bg-transparent p-1"
+                      value={fov ?? ''} onChange={e => {
+                        const value = e.target.value === '' ? null : Number(e.target.value);
+                        setTaskGlobals({ field_of_view: value });
+                        onFieldChange(value, 'field_of_view', task);
+                      }} />
+                    <Tooltip arrow title="Required: camera field of view in degrees along the longer side of the video frame. If an intrinsic matrix or complete sensor calibration is supplied, that calibration takes precedence.">
+                      <HelpOutlineIcon fontSize="small" />
+                    </Tooltip>
+                  </div>
+                </div>
+                </div>
               </div>
             </>
           )}

@@ -16,6 +16,9 @@ from django.core.cache import cache
 from fractions import Fraction
 
 def get_ffmpeg_path():
+    if sys.platform.startswith('linux'):
+        from app.analysis.linux_ffmpeg import get_linux_ffmpeg
+        return get_linux_ffmpeg()
     if getattr(sys, 'frozen', False):
         base_path = sys._MEIPASS
         return os.path.join(base_path, "ffmpeg")

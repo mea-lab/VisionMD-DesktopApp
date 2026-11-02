@@ -8,14 +8,14 @@ export const validHeight = height => Number.isFinite(Number(height)) && Number(h
 export const isGait = task => task?.name?.toLowerCase() === 'gait';
 export const requiresParticipantHeight = task => ['gait', 'sit to stand'].includes(task?.name?.toLowerCase());
 
-export function HeightInput({ value, onChange }) {
+export function HeightInput({ value, onChange, labelClassName = "" }) {
   const [unit, setUnit] = useState('cm');
   const inches = validHeight(value) ? Number(value) / 2.54 : 0;
   const feet = Math.floor(Math.round(inches * 100) / 100 / 12);
   const remainder = Math.round((inches - feet * 12) * 100) / 100;
   const inputClass = 'w-20 rounded border border-zinc-500 bg-transparent p-1';
-  return <div className="flex flex-wrap items-center gap-2">
-    <span>Height:</span>
+  return <div className="flex flex-nowrap items-center gap-2 whitespace-nowrap">
+    <span className={labelClassName}>Height:</span>
     <select aria-label="Height units" className="rounded border border-zinc-500 bg-transparent p-1" value={unit} onChange={e => setUnit(e.target.value)}>
       <option value="cm">cm</option><option value="ft">ft / in</option>
     </select>
