@@ -35,6 +35,7 @@ export default function SitToStandGraphs({ selectedTaskIndex, tasks, setTasks, v
     return result;
   }, [draft]);
   if (!sts || !cache) return <p className="p-4">Run sit-to-stand analysis to view the rise and review its boundaries.</p>;
+  const metric = sts.quality.metric_scaling === 'height_calibrated_3d';
   const signals = sts.signals;
   const time = signals.time;
   const start = time[0], end = time.at(-1), fps = cache.fps;
@@ -63,9 +64,9 @@ export default function SitToStandGraphs({ selectedTaskIndex, tasks, setTasks, v
   const bands = [{start:sts.boundaries.preparation_start,end:sts.boundaries.rise_end,color:'rgba(96,165,250,.07)'},
     ...(showCentral ? [{...sts.central_ascent,color:'rgba(96,165,250,.17)'}] : [])];
   const plotGroups = [
-    {key:'pelvis_height',title:'Pelvis height',unit:'Relative to ankle midpoint · Body-size reference units',axisLabel:'Pelvis height (relative)',time,series:[{name:'Pelvis height',values:signals.pelvis_height,color:BLUE}]},
+    {key:'pelvis_height',title:'Pelvis height',unit:metric ? 'Ankle-relative height (cm) · Estimated standing body axis' : 'Relative to ankle midpoint · Body-size reference units',axisLabel:metric ? 'Pelvis height (cm)' : 'Pelvis height (relative)',time,series:[{name:'Pelvis height',values:signals.pelvis_height,color:BLUE}]},
     {key:'preparation',title:'Preparation signals',unit:'Departure ÷ detection threshold · Threshold = 1',axisLabel:'Departure / threshold',time,series:[{name:'Pelvis departure',values:signals.pelvis_evidence,color:BLUE},{name:'Shoulder movement relative to pelvis',values:signals.shoulder_evidence,color:ORANGE}],threshold:1},
-    {key:'velocity',title:'Pelvis vertical velocity',unit:'Image-vertical velocity (pixels/s) · Peaks counted from absolute speed',axisLabel:'Velocity (pixels/s)',time,series:[{name:'Vertical velocity',values:signals.pelvis_velocity,color:BLUE}],peaks:sts.speed_peaks},
+    {key:'velocity',title:'Pelvis vertical velocity',unit:metric ? 'Ankle-relative vertical velocity (cm/s)' : 'Image-vertical velocity (pixels/s) · Peaks counted from absolute speed',axisLabel:metric ? 'Velocity (cm/s)' : 'Velocity (pixels/s)',time,series:[{name:'Vertical velocity',values:signals.pelvis_velocity,color:BLUE}],peaks:sts.speed_peaks},
   ];
   return <div className="text-gray-100">
     <AnalysisWindowPanel title="Preparation & rise segments" expanded={expanded} onToggle={() => setExpanded(!expanded)} description={`Cached sit-to-stand range: ${start.toFixed(3)}–${end.toFixed(3)} s. Drag markers to adjust times; click to seek.`}>
@@ -81,7 +82,7 @@ export default function SitToStandGraphs({ selectedTaskIndex, tasks, setTasks, v
       eventLegend={EVENTS.map(([key,label,color]) => <span key={key}><span style={{color}}>┆</span> {label}: {sts.boundaries[key].toFixed(3)} s</span>)} />
     <div className="mx-4 mt-4">
     <p className="text-xs text-gray-300">{sts.reviewed ? 'Reviewed boundaries applied.' : 'Automatic boundaries; review in the video.'} Motion feature window: {sts.feature_window.start.toFixed(3)}–{sts.feature_window.end.toFixed(3)} s ({sts.feature_window.source === 'automatic_5_95' ? 'automatic 5–95% rise' : 'reviewed rise interval'}). Central ascent time remains the automatic 10–90% measurement.</p>
-    <p className="mt-2 text-xs text-gray-300">Pelvic movement end does not confirm full upright posture. Arm geometry does not establish hand support. Metric height scaling is not applied.</p>
+    <p className="mt-2 text-xs text-gray-300">Pelvic movement end does not confirm full upright posture. Arm geometry does not establish hand support. {metric ? 'Distances and speeds use entered height and the final 3D body reference; calibration assumes an upright final posture.' : 'Metric height scaling is not applied.'}</p>
     {sts.quality.warnings.map((warning,i) => <p key={i} className="mt-2 text-sm text-orange-300">{warning}</p>)}
     </div>
   </div>;

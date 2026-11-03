@@ -110,7 +110,9 @@ def test_initial_task_uses_pose_path_without_gait_phase_inference(track,monkeypa
     assert result['linePlot']['time'][0]==1.
     assert result['sit_to_stand']['subject_height_cm']==175
     assert video.released
-    assert result['sit_to_stand']['quality']['metric_scaling']=='not_applied'
+    assert result['sit_to_stand']['quality']['metric_scaling']=='height_calibrated_3d'
+    assert 'Pelvis excursion (cm)' in result
+    assert 'Pelvis excursion (relative)' not in result
 
 
 def test_missing_pose_gate_blocks_long_gap(track):
@@ -136,3 +138,55 @@ def test_shared_camera_setup_retains_fractional_measurements(tmp_path,settings,m
     assert task.field_of_view==55.5
     assert task.intrinsic_matrix[0][0]==pytest.approx(4.25/3.45*1000)
     assert task.intrinsic_matrix[2]==[0,0,1]
+
+
+@pytest.fixture
+def metric_track(track):
+    p, fps = track
+    p3 = np.dstack([p * 3, np.zeros(p.shape[:2])])
+    p3[:, 0] = p3[:, [2, 5]].mean(axis=1) + [0, -200, 0]
+    return p, p3, fps
+
+
+def test_metric_height_scale_and_units(metric_track):
+    from app.analysis.tasks._sit_to_stand_metric import apply_metric_measurements, METRIC_LABELS
+    p, p3, fps = metric_track
+    r = apply_metric_measurements(analyze(p, fps), p3, 175)
+    doubled_height = apply_metric_measurements(analyze(p, fps), p3, 350)
+    doubled_model = apply_metric_measurements(analyze(p, fps), p3 * 2, 175)
+    for label in METRIC_LABELS.values():
+        assert doubled_height[label] == pytest.approx(2 * r[label])
+        assert doubled_model[label] == pytest.approx(r[label])
+    assert r['Ascent velocity coefficient of variation'] == pytest.approx(doubled_height['Ascent velocity coefficient of variation'])
+    assert r['sit_to_stand']['boundaries'] == analyze(p, fps)['sit_to_stand']['boundaries']
+    assert 'pelvis_excursion_relative' in r['sit_to_stand']['relative_features']
+    json.dumps(r, allow_nan=False)
+
+
+def test_metric_cached_boundary_review_and_restore(metric_track):
+    from app.analysis.tasks._sit_to_stand_metric import apply_metric_measurements
+    p, p3, fps = metric_track
+    initial = apply_metric_measurements(analyze(p, fps), p3, 175)
+    initial['File name'] = 'chair.mp4'
+    bounds = dict(initial['sit_to_stand']['boundaries'])
+    bounds['rise_end'] -= .1
+    factory = APIRequestFactory()
+    edited = update_sit_to_stand(factory.post('/api/update_sit_to_stand/', {'json_data': json.dumps({'task_data': initial, 'boundaries': bounds})}))
+    assert edited.status_code == 200
+    assert edited.data['sit_to_stand']['quality']['metric_scaling'] == 'height_calibrated_3d'
+    assert edited.data['sit_to_stand']['feature_window']['source'] == 'reviewed_rise_interval'
+    assert edited.data['sit_to_stand']['metric_calibration']['reference_start_time'] == pytest.approx(bounds['rise_end'], abs=1/fps)
+    assert edited.data['Pelvis excursion (cm)'] != initial['Pelvis excursion (cm)']
+    restored = update_sit_to_stand(factory.post('/api/update_sit_to_stand/', {'json_data': json.dumps({'task_data': edited.data, 'restore_automatic': True})}))
+    assert restored.status_code == 200
+    assert restored.data['Pelvis excursion (cm)'] == pytest.approx(initial['Pelvis excursion (cm)'])
+    assert 'Pelvis excursion (relative)' not in restored.data
+
+
+def test_metric_requires_valid_3d_and_height(metric_track):
+    from app.analysis.tasks._sit_to_stand_metric import apply_metric_measurements
+    p, p3, fps = metric_track
+    with pytest.raises(ValueError):
+        apply_metric_measurements(analyze(p, fps), p3[:-1], 175)
+    with pytest.raises(ValueError):
+        apply_metric_measurements(analyze(p, fps), p3, 0)

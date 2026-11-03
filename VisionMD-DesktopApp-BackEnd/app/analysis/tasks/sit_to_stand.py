@@ -4,6 +4,7 @@ import numpy as np
 from rest_framework.response import Response
 from .gait import GaitTask
 from ._sit_to_stand import analyze, runs
+from ._sit_to_stand_metric import apply_metric_measurements
 
 
 class SitToStandTask(GaitTask):
@@ -67,11 +68,11 @@ class SitToStandTask(GaitTask):
             self._progress(90,'Measuring the sit-to-stand transition…')
             # Frame-aligned time origin, including non-integral task start times.
             result = analyze(original['poses2d'],self.fps,self.start_frame_idx/self.fps)
+            result = apply_metric_measurements(result, original['poses3d'], self.height_cm)
             result.update({'File name':self.file_name,'Task name':self.task_name,'landMarks_3D':original['poses3d'].tolist(),'landmarkGapQuality':self.tracking_quality})
             result['sit_to_stand']['camera'] = {key:getattr(self,key) for key in ('field_of_view','sensor_width','sensor_height','focal_length','intrinsic_matrix','extrinsic_matrix')}
             result['sit_to_stand']['subject_height_cm'] = self.height_cm
             result['sit_to_stand']['quality']['full_person_visibility'] = self.full_person_visibility or 'not_certified'
-            result['sit_to_stand']['quality']['height_scaling'] = 'Not applied: no validated upright full-person height reference.'
             return result
         except (ValueError,KeyError,TypeError) as exc:
             return Response({'detail':str(exc)},status=400)

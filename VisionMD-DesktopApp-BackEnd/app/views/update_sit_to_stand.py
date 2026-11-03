@@ -3,6 +3,7 @@ import json
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from app.analysis.tasks._sit_to_stand import analyze, VERSION
+from app.analysis.tasks._sit_to_stand_metric import apply_metric_measurements
 from app.analysis.analysis_quality import assess_analysis_quality
 from app.analysis.landmark_schema import attach_landmark_schema
 
@@ -24,12 +25,18 @@ def update_sit_to_stand(request):
         result = analyze(cache['poses2d'],cache['fps'],cache['start_time'],
             boundaries=None if payload.get('restore_automatic') is True else payload['boundaries'],
             automatic=cache['automatic_boundaries'])
+        height = cache.get('subject_height_cm', data.get('sit_to_stand', {}).get('subject_height_cm'))
+        if data.get('landMarks_3D') is not None and height is not None:
+            result = apply_metric_measurements(result, data['landMarks_3D'], height)
         output = {**data,**result}
+        if result['sit_to_stand']['quality']['metric_scaling'] == 'height_calibrated_3d':
+            for label in ('Pelvis excursion (relative)', 'Lateral pelvis range (relative)', 'Mean crossed-arm distance (relative)', 'Crossed-arm distance range (relative)'):
+                output.pop(label, None)
         # Keep acquisition metadata and the original full recording cache.
         for key in ('camera','subject_height_cm'):
             if key in data.get('sit_to_stand',{}):
                 output['sit_to_stand'][key] = data['sit_to_stand'][key]
-        for key in ('full_person_visibility','height_scaling'):
+        for key in ('full_person_visibility',):
             if key in data.get('sit_to_stand',{}).get('quality',{}):
                 output['sit_to_stand']['quality'][key] = data['sit_to_stand']['quality'][key]
         output['analysisQuality'] = assess_analysis_quality(output)

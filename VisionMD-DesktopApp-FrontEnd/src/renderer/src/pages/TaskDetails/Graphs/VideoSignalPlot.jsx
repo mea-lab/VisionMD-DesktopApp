@@ -108,7 +108,15 @@ export default function VideoSignalPlot({ title, unit, axisLabel, time, series, 
     const video = videoRef?.current;
     if (video) { if (video.paused) video.play()?.catch(() => {}); else video.pause(); }
   }}>
-    <h3 className="mb-2 font-medium text-gray-100">{title}</h3>
+    <div className="mb-2 flex items-center justify-between gap-3">
+      <h3 className="font-medium text-gray-100">{title}</h3>
+      <button type="button" className="shrink-0 rounded border border-zinc-500 px-3 py-1 text-sm text-gray-100 hover:bg-zinc-600"
+        title="Show the full recording range" aria-label="Reset graph zoom"
+        onDoubleClick={event => event.stopPropagation()}
+        onClick={() => chartRef.current?.setScale('x', { min: time[0], max: time.at(-1) })}>
+        Reset zoom
+      </button>
+    </div>
     {unit && <p className="mb-2 text-xs text-gray-300">{unit}</p>}
     <div role="img" aria-label={`${title} over time; ${unit || title}. Click to seek; drag to zoom.`}>
       <UplotReact options={options} data={data} onCreate={chart => { chartRef.current = chart; }} onDelete={() => { chartRef.current = null; }} />

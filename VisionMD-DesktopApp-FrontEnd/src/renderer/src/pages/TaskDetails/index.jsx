@@ -23,6 +23,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import AnalysisQualityBadge from '../../components/AnalysisQualityBadge';
 import { runAnalysisJob } from '../../utils/analysisJobs';
+import { resetTaskForAnalysis, needsFreshAnalysis, taskWithAnalysisResult, FRESH_ANALYSIS_KEY } from '../../utils/resetAnalysis';
 
 const withoutKeys = (value, keys) => Object.fromEntries(
   Object.entries(value).filter(([key]) => !keys.includes(key))
@@ -105,35 +106,24 @@ const TaskDetails = () => {
     if (jsonFileUploaded && jsonContent) {
       setTasks(prev => {
         const newTasks = [...prev];
-        newTasks[selectedTask] = {
-          ...newTasks[selectedTask],
-          data: { ...jsonContent },
-        };
+        newTasks[selectedTask] = taskWithAnalysisResult(newTasks[selectedTask], { ...jsonContent });
         return newTasks;
       });
     }
   };
 
   const resetTask = () => {
-    setTasks(prev => {
-      const newTasks = [...prev];
-      newTasks[selectedTask] = { ...newTasks[selectedTask], data: null };
-      return newTasks;
-    });
-    
-    const currentTask = tasks?.[selectedTask];
-    const currentTaskId = currentTask?.id;
-
-    setTaskErrors(prev => {
-      return withoutKeys(prev, [String(currentTaskId)]);
-    });
+    const currentTaskId = tasks?.[selectedTask]?.id;
+    if (currentTaskId == null || analyzingAll || openJsonUpload) return;
+    setTasks(previous => previous.map(task => task.id === currentTaskId ? resetTaskForAnalysis(task) : task));
+    setTaskErrors(previous => withoutKeys(previous, [String(currentTaskId)]));
   };
 
   const reanalyzePsWithWilor = () => {
     const taskId = tasks?.[selectedTask]?.id;
     if (taskId == null) return;
     setTasks(previous => previous.map(task => task.id === taskId
-      ? { ...task, ps_method: 'wilor', data: null }
+      ? resetTaskForAnalysis({ ...task, ps_method: 'wilor' })
       : task));
     window.setTimeout(() => setOpenJsonUpload(true), 0);
   };
@@ -174,7 +164,7 @@ const TaskDetails = () => {
       }));
 
       const { start, end, name } = taskData;
-      const otherTaskFields = withoutKeys(taskData, ['start', 'end', 'name', 'data']);
+      const otherTaskFields = withoutKeys(taskData, ['start', 'end', 'name', 'data', FRESH_ANALYSIS_KEY]);
       let jsonData = {
         boundingBox: taskBoxCords,
         task_name: name,
@@ -197,6 +187,7 @@ const TaskDetails = () => {
         taskName: sanitizedTaskName,
         videoId,
         jsonData,
+        force: needsFreshAnalysis(taskData),
         onUpdate: job => setAnalysisJobs(previous => ({ ...previous, [taskId]: job })),
       });
       const safeFileName = fileName.replace(/\.[^/.]+$/, "");
@@ -204,7 +195,7 @@ const TaskDetails = () => {
       setTasks(prev =>
         prev.map(t =>
           t.id === taskId
-            ? { ...t, data: { ...result, fileName: safeFileName } }
+            ? taskWithAnalysisResult(t, { ...result, fileName: safeFileName })
             : t
         )
       );
@@ -350,7 +341,7 @@ const TaskDetails = () => {
             </button>
 
             {/* Reset */}
-            <button className={btn} onClick={resetTask}>
+            <button className={btn} onClick={resetTask} disabled={analyzingAll || openJsonUpload || !currentTask} title="Clear this result and rerun video processing on the next analysis">
               <RestartAltIcon fontSize="small" />
               Reset
             </button>

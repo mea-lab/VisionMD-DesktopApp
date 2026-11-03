@@ -14,6 +14,7 @@ import CloseIcon from '@mui/icons-material/Close';
 import { VideoContext } from '../../contexts/VideoContext';
 import { cancelAnalysisJob, runAnalysisJob } from '../../utils/analysisJobs';
 import { useTheme } from '../../contexts/ThemeContext';
+import { needsFreshAnalysis, FRESH_ANALYSIS_KEY } from '../../utils/resetAnalysis';
 
 const withoutKeys = (value, keys) => Object.fromEntries(
   Object.entries(value).filter(([key]) => !keys.includes(key))
@@ -110,7 +111,7 @@ export default function JSONUploadDialog({
           data: data.filter(item => item.Subject === true)
         }))
         
-      const otherTaskFields = withoutKeys(taskData, ['start', 'end', 'name', 'data']);
+      const otherTaskFields = withoutKeys(taskData, ['start', 'end', 'name', 'data', FRESH_ANALYSIS_KEY]);
       let jsonData = {
         boundingBox: taskBoxCords,
         task_name: taskData.name,
@@ -134,6 +135,7 @@ export default function JSONUploadDialog({
         taskName: sanitizedTaskName,
         videoId,
         jsonData,
+        force: needsFreshAnalysis(taskData),
         onUpdate: setAnalysisJob,
       });
       handleJSONUpload(true, analysisResult);

@@ -22,16 +22,29 @@ retains video-space XY for the existing video landmark overlays. Source videos
 are never removed. Tracking gaps longer than 0.5 s or over 10% of frames stop
 analysis; shorter repairs are reported.
 
-Height and camera inputs are retained with the result. No metric displacement
-or height-derived scaling is reported in this version: that requires an eligible,
-upright full-body reference and a validated calibration method. Normalized
-shoulder-to-ankle reference length is not the person's stature. The optional
-visibility metadata does not itself establish an upright reference.
+Height and camera inputs are retained with the result. For new analyses, 3D poses
+are scaled by entered height divided by the median model head-top-to-ankle
+stature in the approximately 0.3-second terminal reference window. No fitted gait
+calibration coefficient is used. The reference is recalculated when the rise
+interval changes. The terminal head-to-ankle axis supplies the estimated vertical
+and the orthogonal shoulder axis supplies lateral direction; this assumes an
+upright terminal reference and is not a floor/gravity calibration.
+
+Pelvis excursion, lateral range and crossed-arm distances are reported in cm;
+mean and P95 ascent velocity are reported in cm/s. Pelvis coordinates are relative
+to the ankle midpoint. Velocity CV and peak count use the same metric velocity.
+The 2D normalized research outputs remain in JSON under `relative_features` and
+`relative_signals`; `metric_calibration` records the exact factor, axes and window.
+Existing 2D event detection, time measures and trunk-angle definitions are retained.
+Older results without 3D poses and height retain their original relative units.
+These metric estimates have not undergone a new reference-validation analysis.
 
 ## Measurements
 
-The implementation in `tasks/_sit_to_stand.py` ports the study's 10 selected
-features, excluding SPARC, jerk and pause fraction:
+The original implementation in `tasks/_sit_to_stand.py` ports the study's 10 selected
+features, excluding SPARC, jerk and pause fraction. Their original relative definitions
+are listed below; `tasks/_sit_to_stand_metric.py` supplies the metric distance/speed
+outputs above, including mean and P95 ascent speed:
 
 1. Candidate-local 10–90% ankle-relative pelvis ascent time (seconds).
 2. Signed normalized ascent velocity coefficient of variation (population SD/mean).
